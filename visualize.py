@@ -1,5 +1,6 @@
 """
 그래프 시각화 - NetworkX + matplotlib
+경삼관 내부 도면 기반 그래프 시각화
 """
 import os
 import sqlite3
@@ -7,7 +8,10 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use("Agg")
-from pathfinder import build_graph, find_shortest_path, score_to_accessibility
+from pathfinder import (
+    build_graph, find_shortest_path, get_all_nodes, get_all_edges,
+    PROFILES, MODES, PROFILE_LABELS,
+)
 
 matplotlib.rcParams["font.family"] = "Malgun Gothic"
 matplotlib.rcParams["axes.unicode_minus"] = False
@@ -17,116 +21,226 @@ DB_PATH = os.path.join(SCRIPT_DIR, "goahead.db")
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "output")
 
 
-def get_node_positions():
-    """DB에서 위경도 좌표 추출"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT node_id, latitude, longitude, name FROM node")
-    pos = {}
-    labels = {}
-    for row in cur.fetchall():
-        pos[row["node_id"]] = (row["longitude"], row["latitude"])
-        labels[row["node_id"]] = f"{row['node_id']}\n{row['name']}"
-    conn.close()
-    return pos, labels
+def get_manual_positions():
+    """경삼관 구조에 따른 수동 좌표 배치 (x=좌우, y=상하)"""
+    return {
+        "서관_시작노드":          (0, 0),
+        "서관_중앙입구":          (1, 1),
+        "서관_쪽계단앞":          (2, 2),
+        "서관_왼쪽장애인통로":     (0, 2),
+        "서관_엘리베이터":        (1, 3),
+        "서관_통로":              (3, 2.5),
+        "서관_1층_계단":          (1, 4),
+        "서관_2층_대학행정팀":    (0.5, 5),
+        "서관_2층_계단":          (1, 5),
+        "서관_2층_엘리베이터":    (1.5, 5),
+        "서관_2층_열람실계단":    (2, 5),
+        "서관_3층_계단":          (1, 6),
+        "서관_3층_엘리베이터":    (1.5, 6),
+        "서관_3층_열람실":        (2, 6),
+        "서관_4층_휴게실(사용중지)": (1, 7),
+        "서관_1층_열람실계단":    (2, 4),
+        "동관_시작노드":          (4, 0),
+        "동관_중앙입구":          (5, 1),
+        "동관_쪽계단앞":          (6, 2),
+        "동관_오른쪽장애인통로":   (4, 2),
+        "동관_쪽길":              (7, 1),
+        "동관_계단쪽복도":        (5, 3),
+        "동관_엘리베이터":        (5, 4),
+        "동관_1층_계단":          (5, 5),
+        "동관_2층_계단":          (5, 6),
+        "동관_3층_계단":          (5, 7),
+        "동관_2층_자료실1":       (4.5, 6),
+        "동관_3층_자료실2":       (4.5, 7),
+        "동관_4층_북카페":        (4.5, 8),
+        "동관_주차장쪽계단":      (6, 4),
+        "열람실_입구(경로1_중간쪽계단)": (7, 5),
+        "열람실_입구(경로2_구름다리)":   (7.5, 5.5),
+        "열람실_입구(경로3_엘리베이터)": (8, 5),
+        "열람실_입구(경로4_서쪽계단)":   (7, 6),
+        "열람실_입구(경로5_1층계단)":   (7.5, 6.5),
+        "꼼지락":                  (4.5, 2.5),
+    }
 
 
-def visualize_all(profile="normal", save_path=None):
-    """전체 그래프 + 최단경로 표시"""
+def visualize_path(profile, mode, start, end, save_path=None):
+    """개별 프로필+모드 경로 시각화"""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    G = build_graph(profile, mode)
+    pos = get_manual_positions()
 
-    G = build_graph(profile)
-    pos, labels = get_node_positions()
+    fig, ax = plt.subplots(1, 1, figsize=(18, 12))
 
-    fig, ax = plt.subplots(1, 1, figsize=(16, 12))
+    path, tw, details, summary = find_shortest_path(start, end, profile, mode)
 
-    # 전체 엣지 (연한 회색)
-    nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.15, edge_color="gray",
-                           arrows=True, arrowsize=8, width=0.5)
+    all_edges = list(G.edges())
+    all_nodes_list = list(G.nodes())
 
-    # 최단경로 (N001 -> N010)
-    path, total, details = find_shortest_path("N001", "N010", profile)
+    nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.12, edge_color="gray",
+                           arrows=True, arrowsize=6, width=0.5)
+
+    path_edges = []
     if path and len(path) > 1:
         path_edges = list(zip(path[:-1], path[1:]))
         nx.draw_networkx_edges(G, pos, edgelist=path_edges, ax=ax,
-                               edge_color="red", width=3, alpha=0.9,
+                               edge_color="#e74c3c", width=3, alpha=0.9,
                                arrows=True, arrowsize=15)
-        # 경로상의 노드 강조
         nx.draw_networkx_nodes(G, pos, nodelist=path, ax=ax,
-                               node_color="red", node_size=600, alpha=0.9)
+                               node_color="#e74c3c", node_size=500, alpha=0.9)
+        path_set = set(path)
+        other = [n for n in all_nodes_list if n not in path_set]
     else:
-        nx.draw_networkx_nodes(G, pos, ax=ax,
-                               node_color="lightblue", node_size=400)
+        other = all_nodes_list
 
-    # 나머지 노드
-    other_nodes = [n for n in G.nodes() if n not in (path or [])]
-    nx.draw_networkx_nodes(G, pos, nodelist=other_nodes, ax=ax,
-                           node_color="lightblue", node_size=400, alpha=0.7)
-    nx.draw_networkx_labels(G, pos, labels=labels, ax=ax, font_size=7)
+    nx.draw_networkx_nodes(G, pos, nodelist=other, ax=ax,
+                           node_color="#3498db", node_size=350, alpha=0.6)
 
-    score = score_to_accessibility(total) if path else 0
-    ax.set_title(
-        f"GoAhead 경로 시시뮬레이션\n"
-        f"Profile: {profile}  |  N001 -> N010\n"
-        f"Weight: {total:.2f}  |  Score: {score}/100",
-        fontsize=14,
-    )
+    labels = {n: n for n in all_nodes_list}
+    nx.draw_networkx_labels(G, pos, labels=labels, ax=ax, font_size=6,
+                            font_weight="bold")
+
+    label = PROFILE_LABELS.get(profile, profile)
+    title_lines = [
+        f"경삼관 경로 탐색  |  {label}  |  {mode}",
+        f"{start}  ->  {end}",
+    ]
+    if path:
+        title_lines.append(
+            f"총 거리: {summary['total_distance_m']}m  |  "
+            f"계단: {summary['total_stairs']}칸  |  "
+            f"가중치: {summary['total_weight']:.1f}"
+        )
+    else:
+        title_lines.append("경로를 찾을 수 없습니다.")
+
+    ax.set_title("\n".join(title_lines), fontsize=13, pad=15)
     ax.axis("off")
     plt.tight_layout()
 
     if save_path is None:
-        save_path = os.path.join(OUTPUT_DIR, f"graph_{profile}.png")
+        safe_profile = profile.replace(" ", "_")
+        save_path = os.path.join(OUTPUT_DIR, f"path_{safe_profile}_{mode}.png")
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"  [OK] Saved: {save_path}")
     return save_path
 
 
-def compare_profiles():
-    """프로필별 경로 비교 시각화"""
-    profiles = ["normal", "목발", "휠체어", "유아차", "시각장애_보조"]
-    fig, axes = plt.subplots(1, len(profiles), figsize=(28, 6))
+def visualize_profile_comparison(start, end):
+    """프로필별 경로 비교 (빠른도착 모드)"""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    pos = get_manual_positions()
 
-    pos, labels = get_node_positions()
+    fig, axes = plt.subplots(1, len(PROFILES), figsize=(30, 8))
 
-    for ax, prof in zip(axes, profiles):
-        G = build_graph(prof)
-        path, total, _ = find_shortest_path("N001", "N010", prof)
-        score = score_to_accessibility(total) if path else 0
+    for ax, profile in zip(axes, PROFILES):
+        G = build_graph(profile, "빠른도착")
+        path, tw, details, summary = find_shortest_path(start, end, profile, "빠른도착")
 
         nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.1, edge_color="gray",
-                               arrows=True, arrowsize=5, width=0.3)
+                               arrows=True, arrowsize=4, width=0.3)
 
+        all_nodes_list = list(G.nodes())
         if path and len(path) > 1:
             path_edges = list(zip(path[:-1], path[1:]))
             nx.draw_networkx_edges(G, pos, edgelist=path_edges, ax=ax,
-                                   edge_color="red", width=2.5, alpha=0.9,
+                                   edge_color="#e74c3c", width=2.5, alpha=0.9,
                                    arrows=True, arrowsize=10)
             nx.draw_networkx_nodes(G, pos, nodelist=path, ax=ax,
-                                   node_color="red", node_size=300)
+                                   node_color="#e74c3c", node_size=200)
+            path_set = set(path)
+            other = [n for n in all_nodes_list if n not in path_set]
         else:
-            nx.draw_networkx_nodes(G, pos, ax=ax,
-                                   node_color="lightblue", node_size=200)
+            other = all_nodes_list
 
-        other = [n for n in G.nodes() if n not in (path or [])]
         nx.draw_networkx_nodes(G, pos, nodelist=other, ax=ax,
-                               node_color="lightblue", node_size=200, alpha=0.5)
+                               node_color="#3498db", node_size=120, alpha=0.4)
 
-        status = "X" if total == float("inf") else f"W={total:.1f}"
-        ax.set_title(f"{prof}\n{status} | Score={score}", fontsize=10)
+        label = PROFILE_LABELS.get(profile, profile)
+        if path:
+            title = (f"{label}\n"
+                     f"거리 {summary['total_distance_m']}m | "
+                     f"계단 {summary['total_stairs']}칸\n"
+                     f"W={summary['total_weight']:.1f}")
+        else:
+            title = f"{label}\n경로 없음"
+        ax.set_title(title, fontsize=10)
         ax.axis("off")
 
-    plt.suptitle("프로별 최단경로 비교 (N001 -> N010)", fontsize=14)
+    plt.suptitle(f"프로필별 경로 비교 (빠른도착) | {start} -> {end}", fontsize=14)
     plt.tight_layout()
-    save_path = os.path.join(OUTPUT_DIR, "compare_profiles.png")
+    save_path = os.path.join(OUTPUT_DIR, "compare_profiles_fast.png")
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"  [OK] Saved: {save_path}")
+    return save_path
+
+
+def visualize_mode_comparison(profile, start, end):
+    """모드별 경로 비교 (빠른도착 vs 편하게)"""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    pos = get_manual_positions()
+
+    fig, axes = plt.subplots(1, 2, figsize=(24, 10))
+
+    for ax, mode in zip(axes, MODES):
+        G = build_graph(profile, mode)
+        path, tw, details, summary = find_shortest_path(start, end, profile, mode)
+
+        nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.1, edge_color="gray",
+                               arrows=True, arrowsize=4, width=0.3)
+
+        all_nodes_list = list(G.nodes())
+        if path and len(path) > 1:
+            path_edges = list(zip(path[:-1], path[1:]))
+            nx.draw_networkx_edges(G, pos, edgelist=path_edges, ax=ax,
+                                   edge_color="#e74c3c", width=3, alpha=0.9,
+                                   arrows=True, arrowsize=12)
+            nx.draw_networkx_nodes(G, pos, nodelist=path, ax=ax,
+                                   node_color="#e74c3c", node_size=300)
+            path_set = set(path)
+            other = [n for n in all_nodes_list if n not in path_set]
+        else:
+            other = all_nodes_list
+
+        nx.draw_networkx_nodes(G, pos, nodelist=other, ax=ax,
+                               node_color="#3498db", node_size=200, alpha=0.5)
+
+        label = PROFILE_LABELS.get(profile, profile)
+        if path:
+            title = (f"{mode}\n"
+                     f"거리 {summary['total_distance_m']}m | "
+                     f"계단 {summary['total_stairs']}칸\n"
+                     f"W={summary['total_weight']:.1f}")
+        else:
+            title = f"{mode}\n경로 없음"
+        ax.set_title(title, fontsize=11)
+        ax.axis("off")
+
+    plt.suptitle(f"모드 비교 | {label} | {start} -> {end}", fontsize=14)
+    plt.tight_layout()
+    safe_profile = profile.replace(" ", "_")
+    save_path = os.path.join(OUTPUT_DIR, f"compare_modes_{safe_profile}.png")
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  [OK] Saved: {save_path}")
+    return save_path
 
 
 if __name__ == "__main__":
-    profiles = ["normal", "목발", "휠체어", "유아차", "시각장애_보조"]
-    for p in profiles:
-        visualize_all(p)
-    compare_profiles()
+    start = "서관_시작노드"
+    end = "서관_3층_열람실"
+
+    print("=== 프로필별 경로 시각화 (빠른도착) ===")
+    for p in PROFILES:
+        visualize_path(p, "빠른도착", start, end)
+
+    print("\n=== 프로필별 경로 비교 ===")
+    visualize_profile_comparison(start, end)
+
+    print("\n=== 모드 비교 (일반 보행자) ===")
+    visualize_mode_comparison("일반", start, end)
+
+    print("\n=== 전체 그래프 (일반, 빠른도착) ===")
+    visualize_path("일반", "빠른도착", start, end,
+                   save_path=os.path.join(OUTPUT_DIR, "graph_overview.png"))
