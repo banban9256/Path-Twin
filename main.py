@@ -1,9 +1,5 @@
 """
 Path-Twin - 경삼관 접근성 경로 탐색 시스템
-1) DB 생성
-2) CSV 데이터 로드 및 DB 삽입
-3) 각 프로필별 최단경로 시뮬레이션
-4) 그래프 시각화
 """
 import subprocess
 import sys
@@ -28,7 +24,7 @@ def run_step(script_name, desc):
 if __name__ == "__main__":
     run_step("db_setup.py", "1. DB 테이블 생성")
     run_step("generate_data.py", "2. CSV 로드 및 DB 삽입")
-    run_step("pathfinder.py", "3. 경로 탐색 시뮬레이션 (프로필 x 모드)")
+    run_step("pathfinder.py", "3. 경로 탐색 시뮬레이션")
     run_step("visualize.py", "4. 그래프 시각화")
 
     print("\n[DONE] 전체 파이프라인 완료!")

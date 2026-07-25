@@ -15,231 +15,248 @@ PROFILE_LABELS = {
     "짐": "무거운 짐 소지자",
 }
 
-STEP_HEIGHT_RANK = {"없음": 0, "미니": 1, "중간": 2, "높음": 3}
+# ─── 캐시 ───
+_cached_nodes = None
+_cached_edges = None
 
 
-def _is_blocked(edge, profile):
-    obs = edge.get("obstacle_info", "")
-    if "사용중지" in obs:
-        return True
-    stairs = edge["stairs_count"]
-    step = STEP_HEIGHT_RANK.get(edge.get("step_height", "없음"), 0)
-    door = edge.get("door_type", "없음")
+def _load_data():
+    global _cached_nodes, _cached_edges
+    if _cached_nodes is not None:
+        return _cached_nodes, _cached_edges
 
-    if profile == "휠체어":
-        if stairs > 0:
-            return True
-        if step >= 2:
-            return True
-        if door == "밀고당기는문":
-            return True
-    elif profile == "유아차":
-        if stairs > 0:
-            return True
-        if step >= 1:
-            return True
-    return False
-
-
-def _compute_weight(edge, profile, mode):
-    dist = edge["distance_m"]
-    stairs = edge["stairs_count"]
-    step = STEP_HEIGHT_RANK.get(edge.get("step_height", "없음"), 0)
-    door = edge.get("door_type", "없음")
-
-    if mode == "빠른도착":
-        return _weight_fast(dist, stairs, step, door, profile)
-    else:
-        return _weight_comfort(dist, stairs, step, door, profile)
-
-
-def _weight_fast(dist, stairs, step, door, profile):
-    if profile == "일반":
-        w = dist + stairs * 1 + step * 2
-        if door == "밀고당기는문":
-            w += 3
-        return w
-    if profile == "휠체어":
-        w = dist
-        if door == "밀고당기는문":
-            w += 50
-        return w
-    if profile == "목발":
-        w = dist + stairs * 5 + step * 8
-        if door == "밀고당기는문":
-            w += 10
-        return w
-    if profile == "유아차":
-        w = dist + step * 15
-        if door == "밀고당기는문":
-            w += 25
-        return w
-    if profile == "짐":
-        w = dist + stairs * 3 + step * 5
-        if door == "밀고당기는문":
-            w += 20
-        return w
-    return dist
-
-
-def _weight_comfort(dist, stairs, step, door, profile):
-    if profile == "일반":
-        w = dist + stairs * 8 + step * 5
-        if door == "밀고당기는문":
-            w += 10
-        return w
-    if profile == "휠체어":
-        w = dist
-        if door == "밀고당기는문":
-            w += 80
-        return w
-    if profile == "목발":
-        w = dist + stairs * 30 + step * 40
-        if door == "밀고당기는문":
-            w += 35
-        return w
-    if profile == "유아차":
-        w = dist + step * 60
-        if door == "밀고당기는문":
-            w += 50
-        return w
-    if profile == "짐":
-        w = dist + stairs * 15 + step * 20
-        if door == "밀고당기는문":
-            w += 35
-        return w
-    return dist
-
-
-def build_graph(profile="일반", mode="빠른도착"):
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
     cur.execute("SELECT * FROM node")
-    nodes = cur.fetchall()
+    _cached_nodes = [dict(row) for row in cur.fetchall()]
 
     cur.execute("SELECT * FROM edge")
-    edges = cur.fetchall()
-    conn.close()
+    _cached_edges = [dict(row) for row in cur.fetchall()]
 
+    conn.close()
+    return _cached_nodes, _cached_edges
+
+
+def clear_cache():
+    global _cached_nodes, _cached_edges
+    _cached_nodes = None
+    _cached_edges = None
+
+
+# ─── 차단 판정 ───
+def _is_blocked(edge, profile):
+    stairs = edge["stairs_count"]
+    step = edge["step_height"]
+    door = edge["door_type"]
+    etype = edge["edge_type"]
+
+    if profile == "휠체어":
+        if stairs > 0:
+            return True
+        if step in ("중간", "높음") and etype != "엘리베이터":
+            return True
+        if "밀고당기는문" in door and "자동문" not in door:
+            return True
+    elif profile == "유아차":
+        if stairs > 0:
+            return True
+        if step in ("중간", "높음") and etype != "엘리베이터":
+            return True
+    return False
+
+
+# ─── 가중치 딕셔너리 ───
+WALK_SPEED = 80.0  # m/min
+ELEVATOR_COST = 0.5  # min per floor
+
+STAIR_COST_PER_STEP = {
+    "일반": 0.025,
+    "휠체어": float("inf"),
+    "목발": 0.065,
+    "유아차": float("inf"),
+    "짐": 0.035,
+}
+
+STEP_HEIGHT_COST = {
+    "일반":   {"없음": 0.0,  "미니": 0.05, "중간": 0.15},
+    "휠체어":  {"없음": 0.0,  "미니": 0.0,  "중간": float("inf")},
+    "목발":   {"없음": 0.0,  "미니": 0.12, "중간": 0.35},
+    "유아차":  {"없음": 0.0,  "미니": 0.20, "중간": float("inf")},
+    "짐":     {"없음": 0.0,  "미니": 0.05, "중간": 0.15},
+}
+
+DOOR_COST = {
+    "일반": {
+        "없음": 0.0,
+        "밀고당기는문 1번": 0.10,
+        "밀고당기는문 2번": 0.20,
+        "밀고당기는문 1번 + 자동문 1번": 0.05,
+    },
+    "휠체어": {
+        "없음": 0.0,
+        "밀고당기는문 1번": float("inf"),
+        "밀고당기는문 2번": float("inf"),
+        "밀고당기는문 1번 + 자동문 1번": 0.10,
+    },
+    "목발": {
+        "없음": 0.0,
+        "밀고당기는문 1번": 0.15,
+        "밀고당기는문 2번": 0.30,
+        "밀고당기는문 1번 + 자동문 1번": 0.08,
+    },
+    "유아차": {
+        "없음": 0.0,
+        "밀고당기는문 1번": 0.12,
+        "밀고당기는문 2번": 0.25,
+        "밀고당기는문 1번 + 자동문 1번": 0.06,
+    },
+    "짐": {
+        "없음": 0.0,
+        "밀고당기는문 1번": 0.12,
+        "밀고당기는문 2번": 0.25,
+        "밀고당기는문 1번 + 자동문 1번": 0.06,
+    },
+}
+
+COMFORT_MULTIPLIER = 2.5
+
+
+# ─── 가중치 계산 ───
+def _compute_weight(edge, profile, mode):
+    dist = edge["distance_m"]
+    stairs = edge["stairs_count"]
+    step = edge["step_height"]
+    door = edge["door_type"]
+    etype = edge["edge_type"]
+
+    if etype == "엘리베이터":
+        base = ELEVATOR_COST
+    elif stairs > 0:
+        base = stairs * STAIR_COST_PER_STEP[profile]
+    else:
+        base = dist / WALK_SPEED
+
+    comfort = COMFORT_MULTIPLIER if mode == "편하게" else 1.0
+    step_p = STEP_HEIGHT_COST[profile].get(step, 0.0)
+    door_p = DOOR_COST[profile].get(door, 0.0)
+
+    return base + (step_p + door_p) * comfort
+
+
+# ─── 그래프 빌드 (캐시에서 weight만 재계산) ───
+def build_graph(profile="일반", mode="빠른도착"):
+    nodes, edges = _load_data()
     G = nx.DiGraph()
 
-    for row in nodes:
-        G.add_node(row["node_id"], name=row["name"], type=row["type"])
+    for node in nodes:
+        G.add_node(node["node_id"], name=node["name"], type=node["type"])
 
-    for e in edges:
-        ed = dict(e)
-        if _is_blocked(ed, profile):
+    for edge in edges:
+        w = _compute_weight(edge, profile, mode)
+        if w == float("inf"):
             continue
-        w = _compute_weight(ed, profile, mode)
-        G.add_edge(
-            ed["start_node"], ed["end_node"],
-            weight=w,
-            distance_m=ed["distance_m"],
-            stairs_count=ed["stairs_count"],
-            step_height=ed["step_height"],
-            door_type=ed["door_type"],
-            obstacle_info=ed["obstacle_info"],
-        )
-        G.add_edge(
-            ed["end_node"], ed["start_node"],
-            weight=w,
-            distance_m=ed["distance_m"],
-            stairs_count=ed["stairs_count"],
-            step_height=ed["step_height"],
-            door_type=ed["door_type"],
-            obstacle_info=ed["obstacle_info"],
-        )
+        attrs = {k: v for k, v in edge.items()
+                 if k not in ("edge_id", "start_node", "end_node")}
+        G.add_edge(edge["start_node"], edge["end_node"], weight=w, **attrs)
+        G.add_edge(edge["end_node"], edge["start_node"], weight=w, **attrs)
 
     return G
 
 
+# ─── 빈 결과 템플릿 ───
+_EMPTY_SUMMARY = {
+    "path_length": 0,
+    "total_distance_m": 0,
+    "total_stairs": 0,
+    "total_weight": float("inf"),
+}
+
+
+# ─── 경로 탐색 ───
 def find_shortest_path(start, end, profile="일반", mode="빠른도착"):
     G = build_graph(profile, mode)
+
+    if start not in G or end not in G:
+        return None, float("inf"), [], dict(_EMPTY_SUMMARY)
+
     try:
         path = nx.dijkstra_path(G, start, end, weight="weight")
     except nx.NetworkXNoPath:
-        return None, float("inf"), [], {"path_length": 0, "total_distance_m": 0, "total_stairs": 0, "total_weight": float("inf")}
-    except nx.NodeNotFound as ex:
-        return None, float("inf"), [str(ex)], {"path_length": 0, "total_distance_m": 0, "total_stairs": 0, "total_weight": float("inf")}
+        return None, float("inf"), [], dict(_EMPTY_SUMMARY)
 
-    total_weight = nx.dijkstra_path_length(G, start, end, weight="weight")
+    total_weight = nx.path_weight(G, path, weight="weight")
 
     details = []
-    total_distance = 0
+    total_distance = 0.0
     total_stairs = 0
     for i in range(len(path) - 1):
         u, v = path[i], path[i + 1]
         ed = G[u][v]
-        total_distance += ed["distance_m"]
-        total_stairs += ed["stairs_count"]
+        total_distance += ed.get("distance_m", 0)
+        total_stairs += ed.get("stairs_count", 0)
         details.append({
             "from": u,
             "to": v,
-            "from_name": G.nodes[u].get("name", ""),
-            "to_name": G.nodes[v].get("name", ""),
-            "distance_m": ed["distance_m"],
-            "stairs_count": ed["stairs_count"],
-            "step_height": ed["step_height"],
-            "door_type": ed["door_type"],
-            "obstacle_info": ed["obstacle_info"],
-            "weight": round(ed["weight"], 2),
+            "edge_type": ed.get("edge_type", ""),
+            "distance_m": ed.get("distance_m", 0),
+            "stairs_count": ed.get("stairs_count", 0),
+            "step_height": ed.get("step_height", ""),
+            "door_type": ed.get("door_type", ""),
+            "obstacle_info": ed.get("obstacle_info", ""),
+            "weight": round(ed["weight"], 4),
         })
 
     summary = {
         "path_length": len(path),
         "total_distance_m": round(total_distance, 2),
         "total_stairs": total_stairs,
-        "total_weight": round(total_weight, 2),
+        "total_weight": round(total_weight, 4),
     }
     return path, total_weight, details, summary
 
 
 def find_top_k_paths(start, end, profile="일반", mode="빠른도착", k=3):
     G = build_graph(profile, mode)
+
+    if start not in G or end not in G:
+        return []
+
     try:
-        paths_gen = nx.shortest_simple_paths(G, start, end, weight="weight")
         results = []
-        for i, path in enumerate(paths_gen):
+        for i, path in enumerate(nx.shortest_simple_paths(G, start, end, weight="weight")):
             if i >= k:
                 break
-            tw = sum(
-                G[path[j]][path[j + 1]]["weight"]
-                for j in range(len(path) - 1)
-            )
-            total_dist = sum(
-                G[path[j]][path[j + 1]]["distance_m"]
-                for j in range(len(path) - 1)
-            )
-            total_stairs = sum(
-                G[path[j]][path[j + 1]]["stairs_count"]
-                for j in range(len(path) - 1)
-            )
+            tw = nx.path_weight(G, path, weight="weight")
+            total_dist = sum(G[path[j]][path[j + 1]].get("distance_m", 0)
+                             for j in range(len(path) - 1))
+            total_stairs = sum(G[path[j]][path[j + 1]].get("stairs_count", 0)
+                               for j in range(len(path) - 1))
             details = []
             for j in range(len(path) - 1):
                 u, v = path[j], path[j + 1]
                 ed = G[u][v]
                 details.append({
                     "from": u, "to": v,
-                    "from_name": G.nodes[u].get("name", ""),
-                    "to_name": G.nodes[v].get("name", ""),
-                    "distance_m": ed["distance_m"],
-                    "stairs_count": ed["stairs_count"],
-                    "step_height": ed["step_height"],
-                    "door_type": ed["door_type"],
-                    "obstacle_info": ed["obstacle_info"],
-                    "weight": round(ed["weight"], 2),
+                    "edge_type": ed.get("edge_type", ""),
+                    "distance_m": ed.get("distance_m", 0),
+                    "stairs_count": ed.get("stairs_count", 0),
+                    "step_height": ed.get("step_height", ""),
+                    "door_type": ed.get("door_type", ""),
+                    "obstacle_info": ed.get("obstacle_info", ""),
+                    "weight": round(ed["weight"], 4),
                 })
             results.append({
                 "path": path,
-                "total_weight": round(tw, 2),
+                "total_weight": round(tw, 4),
                 "details": details,
                 "summary": {
                     "path_length": len(path),
                     "total_distance_m": round(total_dist, 2),
                     "total_stairs": total_stairs,
-                    "total_weight": round(tw, 2),
+                    "total_weight": round(tw, 4),
                 },
             })
         return results
@@ -247,46 +264,36 @@ def find_top_k_paths(start, end, profile="일반", mode="빠른도착", k=3):
         return []
 
 
+# ─── 유틸리티 ───
 def get_all_nodes():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT node_id, name, type FROM node ORDER BY node_id")
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    return rows
+    nodes, _ = _load_data()
+    return [{"node_id": n["node_id"], "name": n["name"], "type": n["type"]}
+            for n in nodes]
 
 
 def get_all_edges():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM edge ORDER BY edge_id")
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    return rows
+    _, edges = _load_data()
+    return [dict(e) for e in edges]
 
 
+# ─── CLI ───
 if __name__ == "__main__":
     nodes = get_all_nodes()
-    print("=== Nodes ===")
+    print(f"=== Nodes ({len(nodes)}) ===")
     for n in nodes:
         print(f"  {n['node_id']} ({n['type']})")
 
-    print("\n=== Profile/Mode Simulation ===")
-
     test_routes = [
-        ("서관_시작노드", "서관_엘리베이터"),
-        ("서관_시작노드", "서관_쪽계단앞"),
-        ("동관_시작노드", "동관_엘리베이터"),
-        ("동관_주차장쪽계단", "열람실_입구(경로1_중간쪽계단)"),
-        ("동관_주차장쪽계단", "열람실_입구(경로3_엘리베이터)"),
-        ("동관_쪽길", "열람실_입구(경로5_1층계단)"),
+        ("서관_시작노드", "서관_3층_엘리베이터앞"),
+        ("서관_시작노드", "서관_3층_계단앞"),
+        ("동관_시작노드", "3층_열람실_입구"),
+        ("주차장쪽_시작노드", "3층_열람실_입구"),
+        ("쪽길_시작노드(개구멍)", "3층_열람실_입구"),
     ]
 
     for start, end in test_routes:
         print(f"\n{'='*60}")
-        print(f"  {start} -> {end}")
+        print(f"  {start}  ->  {end}")
         print(f"{'='*60}")
         for profile in PROFILES:
             for mode in MODES:
@@ -295,6 +302,8 @@ if __name__ == "__main__":
                 if path is None:
                     print(f"  {label}: 경로 없음")
                 else:
-                    print(f"  {label}: weight={tw:.1f} dist={summary['total_distance_m']}m "
-                          f"stairs={summary['total_stairs']}개 path={len(path)}개 노드")
+                    print(f"  {label}: weight={tw:.4f}  "
+                          f"dist={summary['total_distance_m']}m  "
+                          f"stairs={summary['total_stairs']}칸  "
+                          f"nodes={summary['path_length']}")
                     print(f"    {' -> '.join(path)}")

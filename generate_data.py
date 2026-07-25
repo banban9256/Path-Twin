@@ -1,22 +1,31 @@
 import os
+import sys
 import sqlite3
 import pandas as pd
 
 SCRIPT_DIR = os.path.dirname(__file__)
 DB_PATH = os.path.join(SCRIPT_DIR, "goahead.db")
-CSV_PATH = os.path.join(
-    os.path.expanduser("~"),
-    "Downloads", "경삼관_접근성_엣지데이터_v1.csv",
-)
+
+DEFAULT_CSV = os.path.join(SCRIPT_DIR, "data", "경삼관_최종_정규화데이터_완료.csv")
+
+
+def get_csv_path():
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+    return os.environ.get("GOAHEAD_CSV", DEFAULT_CSV)
+
 
 NODE_TYPE_RULES = [
+    ("시작노드",    "시작지점"),
     ("엘리베이터", "엘리베이터"),
     ("계단",       "계단"),
-    ("통로",       "통로"),
-    ("장애인통로",  "통로"),
-    ("복도",       "통로"),
-    ("입구",       "건물입구"),
-    ("시작노드",    "건물입구"),
+    ("로비",       "로비"),
+    ("연결통로",    "복도"),
+    ("복도",       "복도"),
+    ("문앞",       "출입구"),
+    ("구름다리",    "구름다리"),
+    ("열람실",     "열람실"),
+    ("입구",       "입구"),
 ]
 
 
@@ -27,26 +36,21 @@ def classify_node(name):
     return "일반"
 
 
-def load_csv():
-    df = pd.read_csv(CSV_PATH, encoding="utf-8-sig")
-    print(f"[OK] CSV loaded: {len(df)} rows")
+def load_csv(csv_path):
+    df = pd.read_csv(csv_path, encoding="utf-8-sig")
+    print(f"[OK] CSV loaded: {len(df)} rows from {os.path.basename(csv_path)}")
     return df
 
 
 def extract_nodes(df):
-    all_nodes = set(df["start_node"].tolist() + df["end_node"].tolist())
-    rows = []
-    for node_id in sorted(all_nodes):
-        rows.append({
-            "node_id": node_id,
-            "name": node_id,
-            "type": classify_node(node_id),
-        })
+    all_nodes = sorted(set(df["start_node"].tolist() + df["end_node"].tolist()))
+    rows = [{"node_id": n, "name": n, "type": classify_node(n)} for n in all_nodes]
     return pd.DataFrame(rows)
 
 
 def insert_to_db(node_df, edge_df):
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
     cur = conn.cursor()
     cur.execute("DELETE FROM edge")
     cur.execute("DELETE FROM node")
@@ -63,17 +67,10 @@ if __name__ == "__main__":
     from db_setup import create_db
     create_db()
 
-    df = load_csv()
+    csv_path = get_csv_path()
+    df = load_csv(csv_path)
 
-    edge_df = df.rename(columns={
-        "start_node": "start_node",
-        "end_node": "end_node",
-        "distance_m": "distance_m",
-        "stairs_count": "stairs_count",
-        "step_height": "step_height",
-        "door_type": "door_type",
-        "obstacle_info": "obstacle_info",
-    })
+    edge_df = df.copy()
     edge_df["step_height"] = edge_df["step_height"].fillna("없음")
     edge_df["door_type"] = edge_df["door_type"].fillna("없음")
     edge_df["obstacle_info"] = edge_df["obstacle_info"].fillna("")
@@ -85,4 +82,5 @@ if __name__ == "__main__":
     print("\n--- Nodes ---")
     print(node_df.to_string(index=False))
     print(f"\n--- Edges ({len(edge_df)} total) ---")
-    print(edge_df.to_string(index=False))
+    print(edge_df[["start_node", "end_node", "edge_type", "distance_m",
+                    "stairs_count", "step_height", "door_type"]].to_string(index=False))
