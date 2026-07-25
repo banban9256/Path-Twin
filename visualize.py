@@ -3,16 +3,19 @@
 """
 import os
 import networkx as nx
-import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 from pathfinder import (
     build_graph, find_shortest_path, get_all_nodes,
     PROFILES, MODES, PROFILE_LABELS,
 )
 
-matplotlib.rcParams["font.family"] = "Malgun Gothic"
-matplotlib.rcParams["axes.unicode_minus"] = False
+_FONT_PATH = r"C:\Windows\Fonts\malgun.ttf"
+_fp = fm.FontProperties(fname=_FONT_PATH)
+_fp_bold = fm.FontProperties(fname=_FONT_PATH, weight="bold")
+plt.rcParams["axes.unicode_minus"] = False
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "output")
@@ -49,6 +52,13 @@ POS = {
 }
 
 
+def _draw_labels(G, pos, ax, font_size=6):
+    for node, (x, y) in pos.items():
+        if node in G.nodes():
+            ax.text(x, y, node, fontsize=font_size, fontproperties=_fp_bold,
+                    ha="center", va="center", color="#222")
+
+
 def visualize_path(profile, mode, start, end, save_path=None):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     G = build_graph(profile, mode)
@@ -73,9 +83,7 @@ def visualize_path(profile, mode, start, end, save_path=None):
     nx.draw_networkx_nodes(G, POS, nodelist=other, ax=ax,
                            node_color="#3498db", node_size=350, alpha=0.6)
 
-    labels = {n: n for n in G.nodes()}
-    nx.draw_networkx_labels(G, POS, labels=labels, ax=ax, font_size=6,
-                            font_weight="bold")
+    _draw_labels(G, POS, ax)
 
     label = PROFILE_LABELS.get(profile, profile)
     title_lines = [f"경삼관 경로 탐색  |  {label}  |  {mode}",
@@ -88,7 +96,7 @@ def visualize_path(profile, mode, start, end, save_path=None):
     else:
         title_lines.append("경로를 찾을 수 없습니다.")
 
-    ax.set_title("\n".join(title_lines), fontsize=13, pad=15)
+    ax.set_title("\n".join(title_lines), fontproperties=_fp, fontsize=13, pad=15)
     ax.axis("off")
     plt.tight_layout()
 
@@ -125,6 +133,8 @@ def visualize_profile_comparison(start, end):
         nx.draw_networkx_nodes(G, POS, nodelist=other, ax=ax,
                                node_color="#3498db", node_size=120, alpha=0.4)
 
+        _draw_labels(G, POS, ax, font_size=4)
+
         label = PROFILE_LABELS.get(profile, profile)
         if path:
             title = (f"{label}\n"
@@ -133,10 +143,11 @@ def visualize_profile_comparison(start, end):
                      f"W={summary['total_weight']:.2f}")
         else:
             title = f"{label}\n경로 없음"
-        ax.set_title(title, fontsize=10)
+        ax.set_title(title, fontproperties=_fp, fontsize=10)
         ax.axis("off")
 
-    plt.suptitle(f"프로필별 경로 비교 (빠른도착) | {start} -> {end}", fontsize=14)
+    plt.suptitle(f"프로필별 경로 비교 (빠른도착) | {start} -> {end}",
+                 fontproperties=_fp, fontsize=14)
     plt.tight_layout()
     save_path = os.path.join(OUTPUT_DIR, "compare_profiles_fast.png")
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -169,6 +180,8 @@ def visualize_mode_comparison(profile, start, end):
         nx.draw_networkx_nodes(G, POS, nodelist=other, ax=ax,
                                node_color="#3498db", node_size=200, alpha=0.5)
 
+        _draw_labels(G, POS, ax, font_size=5)
+
         if path:
             title = (f"{mode}\n"
                      f"거리 {summary['total_distance_m']}m | "
@@ -176,11 +189,12 @@ def visualize_mode_comparison(profile, start, end):
                      f"W={summary['total_weight']:.2f}")
         else:
             title = f"{mode}\n경로 없음"
-        ax.set_title(title, fontsize=11)
+        ax.set_title(title, fontproperties=_fp, fontsize=11)
         ax.axis("off")
 
     label = PROFILE_LABELS.get(profile, profile)
-    plt.suptitle(f"모드 비교 | {label} | {start} -> {end}", fontsize=14)
+    plt.suptitle(f"모드 비교 | {label} | {start} -> {end}",
+                 fontproperties=_fp, fontsize=14)
     plt.tight_layout()
     safe = profile.replace(" ", "_")
     save_path = os.path.join(OUTPUT_DIR, f"compare_modes_{safe}.png")
