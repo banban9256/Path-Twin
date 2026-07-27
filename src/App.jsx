@@ -1,985 +1,1071 @@
+// src/App.jsx
+
 import { useEffect, useMemo, useState } from "react";
+import FloorMap from "./components/FloorMap";
+import { FLOOR_ORDER } from "./mapData";
 import "./App.css";
 
-const profileOptions = [
-  {
-    value: "general",
-    label: "일반 보행자",
-    icon: "🚶",
-    description: "별도의 이동 제약 없이 이동합니다.",
-  },
-  {
-    value: "wheelchair",
-    label: "휠체어 사용자",
-    icon: "♿",
-    description: "계단과 높은 턱을 제외한 경로가 필요합니다.",
-  },
-  {
-    value: "crutches",
-    label: "목발 사용자",
-    icon: "🩼",
-    description: "긴 계단과 급한 경사를 피하는 것이 좋습니다.",
-  },
-  {
-    value: "stroller",
-    label: "유아차 이용자",
-    icon: "👶",
-    description: "넓은 복도와 엘리베이터 중심 경로가 필요합니다.",
-  },
-  {
-    value: "luggage",
-    label: "무거운 짐 소지자",
-    icon: "🧳",
-    description: "계단보다 엘리베이터 이용이 편리합니다.",
-  },
-];
+const API_BASE_URL = "http://127.0.0.1:5000";
 
-const priorityOptions = [
-  {
-    value: "fast",
-    title: "무조건 빨리 도착할래요",
-    description: "이동 시간이 짧은 경로를 우선 추천합니다.",
-    icon: "⚡",
-  },
-  {
-    value: "comfort",
-    title: "조금 느려도 편하게 갈래요",
-    description: "계단, 턱, 긴 이동 구간을 줄인 경로를 추천합니다.",
-    icon: "🌿",
-  },
-];
-
-const locations = [
-  {
-    value: "east-accessible-entrance",
-    label: "동관 장애인 통로 1",
-    floor: 1,
-    mapPoint: "eastEntrance",
-  },
-  {
-    value: "east-accessible-entrance-2",
-    label: "동관 장애인 통로 2",
-    floor: 1,
-    mapPoint: "eastEntrance2",
-  },
-  {
-    value: "west-accessible-entrance",
-    label: "서관 장애인 통로",
-    floor: 1,
-    mapPoint: "westEntrance",
-  },
-  {
-    value: "east-main-entrance",
-    label: "경삼관 동관 입구",
-    floor: 1,
-    mapPoint: "eastMain",
-  },
-  {
-    value: "west-main-entrance",
-    label: "경삼관 서관 입구",
-    floor: 1,
-    mapPoint: "westMain",
-  },
-  {
-    value: "room-6121",
-    label: "1층 동관 로비",
-    floor: 1,
-    mapPoint: "eastRoom",
-  },
-  {
-    value: "room-6101",
-    label: "1층 학생행복라운지",
-    floor: 1,
-    mapPoint: "westRoom",
-  },
-  {
-    value: "room-6221",
-    label: "2층 자료실 1",
-    floor: 2,
-    mapPoint: "eastRoom",
-  },
-  {
-    value: "room-6201",
-    label: "2층 IPP센터",
-    floor: 2,
-    mapPoint: "westRoom",
-  },
-  {
-    value: "room-6204",
-    label: "2층 대학행정팀",
-    floor: 2,
-    mapPoint: "southWestRoom",
-  },
-  {
-    value: "room-6321",
-    label: "3층 자료실 2",
+const DEFAULT_CONFIG = {
+  profiles: [
+    { value: "일반", label: "일반 보행자" },
+    { value: "휠체어", label: "휠체어 사용자" },
+    { value: "목발", label: "목발 사용자" },
+    { value: "유아차", label: "유아차 이용자" },
+    { value: "짐", label: "무거운 짐 소지자" },
+  ],
+  modes: ["빠른도착", "편하게"],
+  start_locations: [
+    { location_id: "kkumjirak", label: "꼼지락", floor: 1, route_node_id: "서관_1층_계단앞" },
+    { location_id: "job_plus_center", label: "대학 일자리 플러스센터", floor: 1, route_node_id: "서관_1층_로비" },
+    { location_id: "cafe", label: "카페", floor: 1, route_node_id: "서관_1층_로비" },
+    { location_id: "copy_room", label: "복사실", floor: 1, route_node_id: "동관_1층_계단앞" },
+    { location_id: "student_happiness_lounge", label: "학생 행복 라운지", floor: 1, route_node_id: "서관_1층_로비" },
+    { location_id: "east_lobby", label: "동관 로비", floor: 1, route_node_id: "동관_1층_로비" },
+    { location_id: "west_entrance", label: "서관 입구", floor: 1, route_node_id: "서관_시작노드" },
+    { location_id: "east_entrance", label: "동관 입구", floor: 1, route_node_id: "동관_시작노드" },
+    { location_id: "west_1f_elevator", label: "서관 1층 엘리베이터 앞", floor: 1, route_node_id: "서관_1층_엘리베이터앞" },
+    { location_id: "central_corridor_1f", label: "1층 중앙 연결통로", floor: 1, route_node_id: "1층_중앙복도(연결통로)" },
+    { location_id: "west_1f_stairs", label: "서관 1층 계단 앞", floor: 1, route_node_id: "서관_1층_계단앞" },
+    { location_id: "east_1f_stairs", label: "동관 1층 계단 앞", floor: 1, route_node_id: "동관_1층_계단앞" },
+    { location_id: "reading_stairs_1f", label: "열람실 계단", floor: 1, route_node_id: "열람실_긴계단_아래(동관쪽길)" },
+    { location_id: "teaching_support_center", label: "교수학습지원센터", floor: 2, route_node_id: "서관_2층_계단앞" },
+    { location_id: "university_admin_team", label: "대학행정팀", floor: 2, route_node_id: "서관_2층_엘리베이터앞" },
+    { location_id: "central_library_room_1", label: "중앙 도서관(자료실 1)", floor: 2, route_node_id: "서관_2층_엘리베이터앞" },
+    { location_id: "ipp_center", label: "IPP센터", floor: 2, route_node_id: "서관_2층_계단앞" },
+    { location_id: "west_2f_stairs", label: "서관 2층 계단 앞", floor: 2, route_node_id: "서관_2층_계단앞" },
+    { location_id: "west_2f_elevator", label: "서관 2층 엘리베이터 앞", floor: 2, route_node_id: "서관_2층_엘리베이터앞" },
+    { location_id: "cloud_bridge_entrance", label: "구름다리 입구", floor: 2, route_node_id: "구름다리_입구" },
+    { location_id: "reading_stairs_2f_entrance", label: "2층 열람실 계단 입구", floor: 2, route_node_id: "구름다리_출구(서관2층)" },
+    { location_id: "central_library_room_2", label: "중앙 도서관(자료실 2)", floor: 3, route_node_id: "서관_3층_엘리베이터앞" },
+    { location_id: "reading_room", label: "열람실", floor: 3, route_node_id: "서관_3층_엘리베이터앞" },
+    { location_id: "seminar_room", label: "세미나실", floor: 3, route_node_id: "서관_3층_계단앞" },
+    { location_id: "west_3f_stairs", label: "서관 3층 계단 앞", floor: 3, route_node_id: "서관_3층_계단앞" },
+    { location_id: "west_3f_elevator", label: "서관 3층 엘리베이터 앞", floor: 3, route_node_id: "서관_3층_엘리베이터앞" },
+    { location_id: "reading_stairs_3f_entrance", label: "3층 열람실 계단 입구", floor: 3, route_node_id: "3층_쪽계단위" },
+    { location_id: "book_cafe", label: "북카페", floor: 4, route_node_id: "서관_3층_엘리베이터앞" },
+    { location_id: "parking_stairs", label: "주차장쪽 계단", floor: "외부", route_node_id: "주차장쪽_시작노드" },
+    { location_id: "side_road_entrance", label: "쪽길 입구", floor: "외부", route_node_id: "쪽길_시작노드(개구멍)" },
+  ],
+  destination: {
+    node_id: "3층_열람실_입구",
+    label: "3층 노트북 열람실",
     floor: 3,
-    mapPoint: "eastRoom",
   },
+};
+
+const REQUIRED_START_LOCATIONS = [
   {
-    value: "room-6305",
-    label: "3층 노트북 열람실 1",
-    floor: 3,
-    mapPoint: "westRoom",
-  },
-  {
-    value: "room-6421",
-    label: "4층 북카페",
-    floor: 4,
-    mapPoint: "eastRoom",
-  },
-  {
-    value: "room-6423",
-    label: "4층 소극장",
-    floor: 4,
-    mapPoint: "southEastRoom",
-  },
-  {
-    value: "room-6425",
-    label: "4층 한신갤러리",
-    floor: 4,
-    mapPoint: "westRoom",
+    location_id: "reading_stairs_1f",
+    label: "열람실 계단",
+    floor: 1,
+    route_node_id: "열람실_긴계단_아래(동관쪽길)",
   },
 ];
 
-const floorRooms = {
-  1: [
-    { x: 55, y: 70, width: 160, height: 80, label: "6124\n회의실" },
-    { x: 55, y: 175, width: 180, height: 105, label: "6121\n동관 로비" },
-    { x: 55, y: 305, width: 190, height: 90, label: "6126\n밀집서고실 1" },
-    { x: 455, y: 65, width: 190, height: 90, label: "6102\n일자리센터" },
-    { x: 475, y: 180, width: 170, height: 90, label: "6101\n행복라운지" },
-    { x: 420, y: 300, width: 225, height: 95, label: "6106\n박물관 전시실" },
-  ],
-  2: [
-    { x: 55, y: 70, width: 180, height: 110, label: "6221\n자료실 1" },
-    { x: 55, y: 285, width: 190, height: 110, label: "6223\n학생상담센터" },
-    { x: 455, y: 65, width: 190, height: 100, label: "6201\nIPP센터" },
-    { x: 470, y: 190, width: 175, height: 80, label: "6202\n교수학습지원센터" },
-    { x: 430, y: 300, width: 215, height: 95, label: "6204\n대학행정팀" },
-  ],
-  3: [
-    { x: 55, y: 70, width: 190, height: 120, label: "6321\n자료실 2" },
-    { x: 55, y: 285, width: 190, height: 110, label: "6324\nJOB SPACE" },
-    { x: 455, y: 65, width: 190, height: 100, label: "6305\n노트북 열람실 1" },
-    { x: 470, y: 190, width: 175, height: 80, label: "6306\n노트북 열람실 2" },
-    { x: 430, y: 300, width: 215, height: 95, label: "6307\n열람실 3" },
-  ],
-  4: [
-    { x: 55, y: 70, width: 190, height: 120, label: "6421\n북카페" },
-    { x: 55, y: 285, width: 190, height: 110, label: "6423\n소극장" },
-    { x: 455, y: 65, width: 190, height: 100, label: "6422\n멀티미디어실" },
-    { x: 470, y: 190, width: 175, height: 80, label: "6425\n한신갤러리" },
-    { x: 430, y: 300, width: 215, height: 95, label: "6426\n국제교류원" },
-  ],
-};
+function mergeStartLocations(apiLocations) {
+  const baseLocations =
+    Array.isArray(apiLocations) && apiLocations.length > 0
+      ? apiLocations
+      : DEFAULT_CONFIG.start_locations;
 
-const destinationPoints = {
-  eastRoom: [140, 220],
-  westRoom: [555, 220],
-  southWestRoom: [535, 350],
-  southEastRoom: [145, 350],
-  eastEntrance: [675, 345],
-  eastEntrance2: [40, 345],
-  westEntrance: [675, 80],
-  eastMain: [350, 420],
-  westMain: [350, 35],
-};
-
-const verticalCorePoints = {
-  elevator: [405, 245],
-  eastStairs: [330, 205],
-  westStairs: [330, 295],
-};
-
-function getLocation(value) {
-  return locations.find((location) => location.value === value);
-}
-
-function createRouteOptions(profile, priority, startLocation, destination) {
-  const start = getLocation(startLocation);
-  const end = getLocation(destination);
-
-  if (!start || !end) {
-    return [];
-  }
-
-  const floorDifference = Math.abs(end.floor - start.floor);
-  const sameFloor = floorDifference === 0;
-
-  const elevatorRoute = {
-    id: "elevator",
-    title: "엘리베이터 중심 경로",
-    subtitle: "계단을 피하고 편안하게 이동",
-    method: "elevator",
-    icon: "🛗",
-    totalSeconds: sameFloor ? 230 : 340 + floorDifference * 55,
-    safetyScore: 96,
-    tag: priority === "comfort" ? "추천" : "편안한 경로",
-    warnings: [
-      "엘리베이터 대기 시간에 따라 소요 시간이 달라질 수 있습니다.",
-      "출입구 주변의 낮은 턱을 주의해 주세요.",
-    ],
-  };
-
-  const eastStairsRoute = {
-    id: "east-stairs",
-    title: "동관 중앙계단 경로",
-    subtitle: "동관 계단을 이용하는 빠른 경로",
-    method: "eastStairs",
-    icon: "🪜",
-    totalSeconds: sameFloor ? 190 : 245 + floorDifference * 38,
-    safetyScore: 78,
-    tag: priority === "fast" ? "가장 빠름" : "빠른 경로",
-    warnings: [
-      "동관 중앙계단 이용 구간이 포함됩니다.",
-      "계단 혼잡 시 이동 시간이 늘어날 수 있습니다.",
-    ],
-  };
-
-  const westStairsRoute = {
-    id: "west-stairs",
-    title: "서관 중앙계단 경로",
-    subtitle: "서관 쪽계단을 이용하는 대안 경로",
-    method: "westStairs",
-    icon: "↗️",
-    totalSeconds: sameFloor ? 205 : 270 + floorDifference * 40,
-    safetyScore: 82,
-    tag: "대안 경로",
-    warnings: [
-      "서관 중앙계단 또는 쪽계단 이용 구간이 포함됩니다.",
-      "계단 폭과 이용자 통행을 주의해 주세요.",
-    ],
-  };
-
-  if (profile === "wheelchair" || profile === "stroller") {
-    return [
-      {
-        ...elevatorRoute,
-        tag: "추천",
-      },
-    ];
-  }
-
-  if (profile === "crutches" || profile === "luggage") {
-    return priority === "fast"
-      ? [eastStairsRoute, elevatorRoute, westStairsRoute]
-      : [elevatorRoute, westStairsRoute, eastStairsRoute];
-  }
-
-  return priority === "fast"
-    ? [eastStairsRoute, westStairsRoute, elevatorRoute]
-    : [elevatorRoute, westStairsRoute, eastStairsRoute];
-}
-
-function formatTime(seconds) {
-  const minutes = Math.floor(seconds / 60);
-  const remainSeconds = seconds % 60;
-
-  return `${minutes}분 ${remainSeconds}초`;
-}
-
-function buildTimeline(route, startLocation, destination) {
-  const start = getLocation(startLocation);
-  const end = getLocation(destination);
-  const sameFloor = start.floor === end.floor;
-
-  const firstStep = {
-    title: start.label,
-    description: `${start.floor}층 출발지에서 이동을 시작합니다.`,
-    time: "50초",
-    type: "start",
-  };
-
-  if (sameFloor) {
-    return [
-      firstStep,
-      {
-        title: `${start.floor}층 중앙 복도`,
-        description: "같은 층의 중앙 복도를 따라 이동합니다.",
-        time: "1분 20초",
-        type: "walk",
-      },
-      {
-        title: end.label,
-        description: "목적지에 도착합니다.",
-        time: "1분",
-        type: "destination",
-      },
-    ];
-  }
-
-  const movingMethod = {
-    elevator: {
-      title: "경삼관 엘리베이터",
-      description: `${start.floor}층에서 ${end.floor}층까지 엘리베이터로 이동합니다.`,
-      time: "2분",
-      type: "elevator",
-    },
-    eastStairs: {
-      title: "동관 중앙계단",
-      description: `${start.floor}층에서 ${end.floor}층까지 동관 중앙계단으로 이동합니다.`,
-      time: "1분 20초",
-      type: "stairs",
-    },
-    westStairs: {
-      title: "서관 중앙계단",
-      description: `${start.floor}층에서 ${end.floor}층까지 서관 쪽계단으로 이동합니다.`,
-      time: "1분 35초",
-      type: "stairs",
-    },
-  };
-
-  return [
-    firstStep,
-    {
-      title: `${start.floor}층 중앙 복도`,
-      description: `${movingMethod[route.method].title} 방향으로 이동합니다.`,
-      time: "1분 10초",
-      type: "walk",
-    },
-    movingMethod[route.method],
-    {
-      title: `${end.floor}층 중앙 복도`,
-      description: `${end.floor}층에서 목적지 방향으로 이동합니다.`,
-      time: "1분 10초",
-      type: "walk",
-    },
-    {
-      title: end.label,
-      description: "목적지에 도착합니다.",
-      time: "50초",
-      type: "destination",
-    },
-  ];
-}
-
-function createReason(profile, priority, route, destination) {
-  const profileName =
-    profileOptions.find((option) => option.value === profile)?.label ??
-    "사용자";
-
-  const priorityText =
-    priority === "fast"
-      ? "이동 시간을 우선하여"
-      : "편안하고 안전한 이동을 우선하여";
-
-  const methodText = {
-    elevator: "계단을 제외하고 엘리베이터를 이용하는",
-    eastStairs: "동관 중앙계단을 활용해 이동 시간을 줄이는",
-    westStairs: "서관 중앙계단을 이용해 혼잡 구간을 분산하는",
-  };
-
-  return `${profileName}의 이동 조건과 선택한 이동 성향을 반영했습니다. ${priorityText} ${methodText[route.method]} 경로를 추천하며, 목적지인 ${getLocation(destination).label}까지의 구간별 이동 정보를 함께 제공합니다.`;
-}
-
-const stepIcons = {
-  start: "🚩",
-  walk: "🚶",
-  stairs: "🪜",
-  elevator: "🛗",
-  destination: "📍",
-};
-
-function FloorMap({
-  floor,
-  activeRoute,
-  startLocation,
-  destination,
-  hasSimulation,
-}) {
-  const start = getLocation(startLocation);
-  const end = getLocation(destination);
-
-  const startPoint =
-    start.floor === floor
-      ? destinationPoints[start.mapPoint] ?? [350, 420]
-      : verticalCorePoints[activeRoute?.method] ?? verticalCorePoints.elevator;
-
-  const endPoint =
-    end.floor === floor
-      ? destinationPoints[end.mapPoint] ?? [555, 220]
-      : verticalCorePoints[activeRoute?.method] ?? verticalCorePoints.elevator;
-
-  const corePoint =
-    verticalCorePoints[activeRoute?.method] ?? verticalCorePoints.elevator;
-
-  let routePoints = "";
-
-  if (hasSimulation && activeRoute) {
-    if (start.floor === end.floor && floor === start.floor) {
-      routePoints = `${startPoint[0]},${startPoint[1]} 350,${startPoint[1]} 350,${endPoint[1]} ${endPoint[0]},${endPoint[1]}`;
-    } else if (floor === start.floor) {
-      routePoints = `${startPoint[0]},${startPoint[1]} 350,${startPoint[1]} 350,${corePoint[1]} ${corePoint[0]},${corePoint[1]}`;
-    } else if (floor === end.floor) {
-      routePoints = `${corePoint[0]},${corePoint[1]} 350,${corePoint[1]} 350,${endPoint[1]} ${endPoint[0]},${endPoint[1]}`;
-    } else if (
-      floor > Math.min(start.floor, end.floor) &&
-      floor < Math.max(start.floor, end.floor)
-    ) {
-      routePoints = `${corePoint[0]},${corePoint[1] - 50} ${corePoint[0]},${corePoint[1] + 50}`;
-    }
-  }
-
-  return (
-    <div className="map-wrapper">
-      <svg
-        className="floor-map"
-        viewBox="0 0 700 450"
-        role="img"
-        aria-label={`경삼관 ${floor}층 간략 지도`}
-      >
-        <rect
-          x="25"
-          y="25"
-          width="650"
-          height="400"
-          rx="26"
-          className="building-outline"
-        />
-
-        <text x="48" y="55" className="wing-label">
-          동관
-        </text>
-
-        <text x="610" y="55" className="wing-label">
-          서관
-        </text>
-
-        <rect x="255" y="105" width="190" height="240" className="core-area" />
-
-        <text x="350" y="132" textAnchor="middle" className="core-label">
-          중앙 이동 구역
-        </text>
-
-        <rect x="305" y="168" width="52" height="72" rx="10" className="stair" />
-        <text x="331" y="197" textAnchor="middle" className="facility-icon">
-          🪜
-        </text>
-        <text x="331" y="222" textAnchor="middle" className="facility-label">
-          동관 계단
-        </text>
-
-        <rect x="305" y="260" width="52" height="72" rx="10" className="stair" />
-        <text x="331" y="289" textAnchor="middle" className="facility-icon">
-          🪜
-        </text>
-        <text x="331" y="314" textAnchor="middle" className="facility-label">
-          서관 계단
-        </text>
-
-        <rect
-          x="378"
-          y="208"
-          width="55"
-          height="76"
-          rx="11"
-          className="elevator"
-        />
-        <text x="405" y="240" textAnchor="middle" className="facility-icon">
-          🛗
-        </text>
-        <text x="405" y="268" textAnchor="middle" className="facility-label">
-          엘리베이터
-        </text>
-
-        {floorRooms[floor].map((room) => (
-          <g key={`${floor}-${room.label}`}>
-            <rect
-              x={room.x}
-              y={room.y}
-              width={room.width}
-              height={room.height}
-              rx="12"
-              className="room"
-            />
-
-            {room.label.split("\n").map((line, index) => (
-              <text
-                key={line}
-                x={room.x + room.width / 2}
-                y={room.y + room.height / 2 + index * 19 - 6}
-                textAnchor="middle"
-                className={index === 0 ? "room-number" : "room-name"}
-              >
-                {line}
-              </text>
-            ))}
-          </g>
-        ))}
-
-        {floor === 1 && (
-          <>
-            <circle cx="350" cy="420" r="10" className="entrance-marker" />
-            <text x="350" y="405" textAnchor="middle" className="entrance-label">
-              동관 입구
-            </text>
-
-            <circle cx="350" cy="35" r="10" className="entrance-marker" />
-            <text x="350" y="65" textAnchor="middle" className="entrance-label">
-              서관 입구
-            </text>
-
-            <rect x="20" y="326" width="30" height="38" rx="7" className="access" />
-            <text x="60" y="350" className="access-label">
-              장애인 통로 2
-            </text>
-
-            <rect
-              x="650"
-              y="326"
-              width="30"
-              height="38"
-              rx="7"
-              className="access"
-            />
-            <text x="530" y="350" className="access-label">
-              장애인 통로 1
-            </text>
-
-            <rect x="650" y="62" width="30" height="38" rx="7" className="access" />
-            <text x="520" y="88" className="access-label">
-              서관 장애인 통로
-            </text>
-          </>
-        )}
-
-        {routePoints && (
-          <>
-            <polyline points={routePoints} className="route-shadow" />
-            <polyline points={routePoints} className="route-line" />
-          </>
-        )}
-
-        {hasSimulation && start.floor === floor && (
-          <g>
-            <circle cx={startPoint[0]} cy={startPoint[1]} r="13" className="start-dot" />
-            <text
-              x={startPoint[0]}
-              y={startPoint[1] - 22}
-              textAnchor="middle"
-              className="point-label"
-            >
-              출발
-            </text>
-          </g>
-        )}
-
-        {hasSimulation && end.floor === floor && (
-          <g>
-            <circle cx={endPoint[0]} cy={endPoint[1]} r="13" className="end-dot" />
-            <text
-              x={endPoint[0]}
-              y={endPoint[1] - 22}
-              textAnchor="middle"
-              className="point-label"
-            >
-              도착
-            </text>
-          </g>
-        )}
-      </svg>
-
-      <div className="map-legend">
-        <span>
-          <i className="legend-line" /> 추천 이동 경로
-        </span>
-        <span>🛗 엘리베이터</span>
-        <span>🪜 계단</span>
-        <span>🟨 장애인 통로</span>
-      </div>
-
-      <p className="map-note">
-        실제 건축 도면이 아닌, 경로 시뮬레이션 UI 검토를 위한 간략 구조도입니다.
-      </p>
-    </div>
+  const locationMap = new Map(
+    baseLocations.map((location) => [
+      location.location_id,
+      location,
+    ]),
   );
+
+  REQUIRED_START_LOCATIONS.forEach((location) => {
+    locationMap.set(location.location_id, {
+      ...locationMap.get(location.location_id),
+      ...location,
+    });
+  });
+
+  return Array.from(locationMap.values());
+}
+
+const PROFILE_META = {
+  일반: {
+    icon: "🚶",
+    title: "일반 보행자",
+    description: "일반적인 보행 조건을 적용합니다.",
+  },
+  휠체어: {
+    icon: "♿",
+    title: "휠체어 사용자",
+    description: "계단을 제외하고 턱과 문 통과 부담을 반영합니다.",
+  },
+  목발: {
+    icon: "🩼",
+    title: "목발 사용자",
+    description: "느린 이동 속도와 계단 부담을 반영합니다.",
+  },
+  유아차: {
+    icon: "👶",
+    title: "유아차 이용자",
+    description: "계단을 제외하고 문과 턱의 불편을 반영합니다.",
+  },
+  짐: {
+    icon: "🧳",
+    title: "무거운 짐 소지자",
+    description: "짐을 든 상태의 이동 부담을 반영합니다.",
+  },
+};
+
+const MODE_META = {
+  빠른도착: {
+    icon: "⚡",
+    title: "뭐가 됐든 빨리 도착할래요",
+    description: "예상 이동 시간이 짧은 경로를 우선 추천합니다.",
+  },
+  편하게: {
+    icon: "🌿",
+    title: "조금 느려도 편하게 갈래요",
+    description: "계단, 턱, 문 통과 부담이 적은 경로를 우선 추천합니다.",
+  },
+};
+
+const ROUTE_COLORS = ["#e85b55", "#5667df", "#1e9b76"];
+
+function formatDuration(totalSeconds) {
+  const safeSeconds = Number(totalSeconds) || 0;
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+
+  if (minutes <= 0) {
+    return `${seconds}초`;
+  }
+
+  if (seconds === 0) {
+    return `${minutes}분`;
+  }
+
+  return `${minutes}분 ${seconds}초`;
+}
+
+function getRouteTitle(route, index) {
+  const details = route?.details ?? [];
+
+  const usesElevator = details.some(
+    (detail) => detail.edge_type === "엘리베이터",
+  );
+
+  const totalStairs = Number(route?.summary?.total_stairs ?? 0);
+
+  const usesSideRoute = (route?.path ?? []).some(
+    (node) =>
+      node.includes("쪽계단") ||
+      node.includes("구름다리") ||
+      node.includes("쪽길"),
+  );
+
+  if (index === 0) {
+    return "가장 추천하는 경로";
+  }
+
+  if (usesElevator && totalStairs === 0) {
+    return "엘리베이터 중심 경로";
+  }
+
+  if (usesSideRoute) {
+    return "쪽길·구름다리 경로";
+  }
+
+  if (totalStairs > 0) {
+    return "계단을 이용하는 대안 경로";
+  }
+
+  return `추천 경로 ${index + 1}`;
+}
+
+function calculateSafetyScore(route) {
+  if (!route) {
+    return 0;
+  }
+
+  const details = route.details ?? [];
+  const totalStairs = Number(route.summary?.total_stairs ?? 0);
+
+  let score = 100;
+
+  score -= Math.min(totalStairs * 0.45, 25);
+
+  details.forEach((detail) => {
+    if (detail.step_height === "미니") {
+      score -= 2;
+    }
+
+    if (detail.step_height === "중간") {
+      score -= 7;
+    }
+
+    if (detail.door_type && detail.door_type !== "없음") {
+      score -= 2;
+    }
+
+    if (
+      detail.obstacle_info &&
+      detail.obstacle_info !== "없음" &&
+      detail.obstacle_info.trim() !== ""
+    ) {
+      score -= 2;
+    }
+  });
+
+  return Math.max(0, Math.round(score));
+}
+
+function getSafetyLabel(score) {
+  if (score >= 90) {
+    return "매우 안전";
+  }
+
+  if (score >= 80) {
+    return "안전";
+  }
+
+  if (score >= 65) {
+    return "주의 필요";
+  }
+
+  return "위험 요소 있음";
+}
+
+
+function getEstimatedSeconds(route) {
+  const value = Number(route?.estimated_seconds);
+  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function getTotalDistance(route) {
+  const value = Number(route?.summary?.total_distance_m);
+  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function getTotalStairs(route) {
+  const value = Number(route?.summary?.total_stairs);
+  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
+/*
+ * 이동 우선순위에 맞춰 경로 후보를 프론트에서도 한 번 더 정렬합니다.
+ *
+ * 빠른도착:
+ *   1) 예상 소요 시간 오름차순
+ *   2) 이동 거리 오름차순
+ *   3) 안전도 내림차순
+ *
+ * 편하게:
+ *   1) 안전도 내림차순
+ *   2) 계단 수 오름차순
+ *   3) 예상 소요 시간 오름차순
+ *   4) 이동 거리 오름차순
+ */
+function sortRoutesByMode(routeList, mode) {
+  const safeRoutes = Array.isArray(routeList) ? [...routeList] : [];
+
+  safeRoutes.sort((routeA, routeB) => {
+    if (mode === "편하게") {
+      const safetyDifference =
+        calculateSafetyScore(routeB) - calculateSafetyScore(routeA);
+
+      if (safetyDifference !== 0) {
+        return safetyDifference;
+      }
+
+      const stairsDifference =
+        getTotalStairs(routeA) - getTotalStairs(routeB);
+
+      if (stairsDifference !== 0) {
+        return stairsDifference;
+      }
+
+      const timeDifference =
+        getEstimatedSeconds(routeA) - getEstimatedSeconds(routeB);
+
+      if (timeDifference !== 0) {
+        return timeDifference;
+      }
+
+      return getTotalDistance(routeA) - getTotalDistance(routeB);
+    }
+
+    const timeDifference =
+      getEstimatedSeconds(routeA) - getEstimatedSeconds(routeB);
+
+    if (timeDifference !== 0) {
+      return timeDifference;
+    }
+
+    const distanceDifference =
+      getTotalDistance(routeA) - getTotalDistance(routeB);
+
+    if (distanceDifference !== 0) {
+      return distanceDifference;
+    }
+
+    return calculateSafetyScore(routeB) - calculateSafetyScore(routeA);
+  });
+
+  return safeRoutes;
+}
+
+function getEdgeIcon(edgeType) {
+  const type = String(edgeType ?? "");
+
+  if (type.includes("엘리베이터")) {
+    return "🛗";
+  }
+
+  if (type.includes("계단")) {
+    return "🪜";
+  }
+
+  if (type.includes("외부")) {
+    return "🌳";
+  }
+
+  if (type.includes("복도")) {
+    return "➡️";
+  }
+
+  if (type.includes("문")) {
+    return "🚪";
+  }
+
+  return "📍";
 }
 
 function App() {
-  const [profile, setProfile] = useState("wheelchair");
-  const [priority, setPriority] = useState("comfort");
-  const [startLocation, setStartLocation] = useState(
-    "east-accessible-entrance",
-  );
-  const [destination, setDestination] = useState("room-6221");
+  const [config, setConfig] = useState(DEFAULT_CONFIG);
 
-  const [selectedFloor, setSelectedFloor] = useState(2);
-  const [routeOptions, setRouteOptions] = useState([]);
-  const [selectedRouteId, setSelectedRouteId] = useState(null);
-  const [hasSimulation, setHasSimulation] = useState(false);
+  const [profile, setProfile] = useState("일반");
+  const [mode, setMode] = useState("빠른도착");
+  const [startLocationId, setStartLocationId] = useState("kkumjirak");
 
-  const selectedProfile = profileOptions.find(
-    (option) => option.value === profile,
-  );
+  const [activeFloor, setActiveFloor] = useState(1);
 
-  const selectedPriority = priorityOptions.find(
-    (option) => option.value === priority,
-  );
+  const [routes, setRoutes] = useState([]);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
 
-  const selectedRoute = useMemo(
+  const [isConfigLoading, setIsConfigLoading] = useState(true);
+  const [isRouteLoading, setIsRouteLoading] = useState(false);
+
+  const [configError, setConfigError] = useState("");
+  const [routeError, setRouteError] = useState("");
+
+  const selectedRoute = routes[selectedRouteIndex] ?? null;
+
+  const selectedRouteColor =
+    ROUTE_COLORS[selectedRouteIndex] ?? ROUTE_COLORS[0];
+
+  const selectedProfileMeta =
+    PROFILE_META[profile] ?? PROFILE_META.일반;
+
+  const selectedModeMeta =
+    MODE_META[mode] ?? MODE_META.빠른도착;
+
+  const selectedStart = useMemo(
     () =>
-      routeOptions.find((route) => route.id === selectedRouteId) ??
-      routeOptions[0] ??
-      null,
-    [routeOptions, selectedRouteId],
+      config.start_locations.find(
+        (location) => location.location_id === startLocationId,
+      ) ?? config.start_locations[0],
+    [config.start_locations, startLocationId],
   );
 
-  const destinationInfo = getLocation(destination);
+  const groupedStartLocations = useMemo(() => {
+    const groups = [1, 2, 3, 4, "외부"];
+
+    return groups
+      .map((floor) => ({
+        floor,
+        locations: config.start_locations.filter(
+          (location) => location.floor === floor,
+        ),
+      }))
+      .filter((group) => group.locations.length > 0);
+  }, [config.start_locations]);
+
+  const safetyScore = useMemo(
+    () => calculateSafetyScore(selectedRoute),
+    [selectedRoute],
+  );
 
   useEffect(() => {
-    if (destinationInfo) {
-      setSelectedFloor(destinationInfo.floor);
+    async function loadConfig() {
+      setIsConfigLoading(true);
+      setConfigError("");
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/config`);
+
+        if (!response.ok) {
+          throw new Error("설정 정보를 불러오지 못했습니다.");
+        }
+
+        const data = await response.json();
+
+        setConfig({
+          profiles:
+            Array.isArray(data.profiles) && data.profiles.length > 0
+              ? data.profiles
+              : DEFAULT_CONFIG.profiles,
+
+          modes:
+            Array.isArray(data.modes) && data.modes.length > 0
+              ? data.modes
+              : DEFAULT_CONFIG.modes,
+
+          start_locations: mergeStartLocations(
+            data.start_locations,
+          ),
+
+          destination:
+            data.destination ?? DEFAULT_CONFIG.destination,
+        });
+
+        if (
+          Array.isArray(data.start_locations) &&
+          data.start_locations.length > 0
+        ) {
+          setStartLocationId(data.start_locations[0].location_id);
+        }
+      } catch (error) {
+        console.error(error);
+
+        setConfig({
+          ...DEFAULT_CONFIG,
+          start_locations: mergeStartLocations(
+            DEFAULT_CONFIG.start_locations,
+          ),
+        });
+        setConfigError(
+          "API 설정을 불러오지 못해 기본 설정을 표시하고 있습니다.",
+        );
+      } finally {
+        setIsConfigLoading(false);
+      }
     }
-  }, [destination, destinationInfo]);
 
-  const resetSimulation = () => {
-    setHasSimulation(false);
-    setRouteOptions([]);
-    setSelectedRouteId(null);
-  };
+    loadConfig();
+  }, []);
 
-  const handleSimulation = () => {
-    if (startLocation === destination) {
-      window.alert("출발지와 목적지를 다르게 선택해 주세요.");
-      return;
+  async function handleSimulation() {
+    setIsRouteLoading(true);
+    setRouteError("");
+    setRoutes([]);
+    setSelectedRouteIndex(0);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/routes`, {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify({
+          start_location_id: startLocationId,
+          start_node_id: selectedStart?.route_node_id,
+          end: config.destination.node_id,
+          profile,
+          mode,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.message ?? "경로 시뮬레이션에 실패했습니다.",
+        );
+      }
+
+      const sortedRoutes = sortRoutesByMode(data.routes, mode);
+
+      setRoutes(sortedRoutes);
+      setSelectedRouteIndex(0);
+      setActiveFloor(
+        typeof selectedStart?.floor === "number"
+          ? selectedStart.floor
+          : 1,
+      );
+    } catch (error) {
+      console.error(error);
+
+      setRouteError(
+        error.message ||
+          "서버와 연결할 수 없습니다. API 서버 실행 상태를 확인해 주세요.",
+      );
+    } finally {
+      setIsRouteLoading(false);
     }
+  }
 
-    const routes = createRouteOptions(
-      profile,
-      priority,
-      startLocation,
-      destination,
-    );
+  function handleRouteSelect(index) {
+    setSelectedRouteIndex(index);
 
-    setRouteOptions(routes);
-    setSelectedRouteId(routes[0]?.id ?? null);
-    setHasSimulation(true);
-    setSelectedFloor(getLocation(destination).floor);
-  };
+    const route = routes[index];
 
-  const timeline = selectedRoute
-    ? buildTimeline(selectedRoute, startLocation, destination)
-    : [];
-
-  const recommendationReason = selectedRoute
-    ? createReason(profile, priority, selectedRoute, destination)
-    : "";
+    if (route?.path?.includes("3층_열람실_입구")) {
+      setActiveFloor(3);
+    }
+  }
 
   return (
-    <div className="app">
-      <header className="service-header">
-        <div className="header-inner">
-          <div>
-            <p className="service-label">접근성 경로 디지털 트윈</p>
-            <h1>AI가 대신 가줍니다</h1>
-            <p className="service-description">
-              사용자의 이동 제약과 이동 성향을 반영해 경삼관 실내 이동 경로를
-              미리 시뮬레이션합니다.
-            </p>
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-header-inner">
+          <div className="brand-area">
+            <div className="brand-mark" aria-hidden="true">
+              PT
+            </div>
+
+            <div>
+              <p className="brand-eyebrow">
+                Inclusive AI Digital Twin
+              </p>
+
+              <h1>AI가 대신 가줍니다</h1>
+            </div>
           </div>
 
-          <span className="dummy-badge">더미데이터 기반 2차 프로토타입</span>
+          <div className="header-status">
+            <span className="status-dot" />
+            <span>경삼관 접근성 경로 시뮬레이터</span>
+          </div>
         </div>
       </header>
 
-      <main className="main-layout">
-        <section className="panel input-panel">
-          <div className="section-heading">
-            <span className="section-number">1</span>
+      <main className="app-main">
+        <aside className="control-panel">
+          <div className="control-panel-header">
+            <span className="step-badge">이동 조건 설정</span>
 
-            <div>
-              <h2>이동 조건 설정</h2>
-              <p>사용자 상태, 이동 성향과 목적지를 설정해 주세요.</p>
-            </div>
+            <h2>오늘의 몸 상태를 알려주세요</h2>
+
+            <p>
+              선택한 조건에 맞춰 실제 경로 데이터를 먼저
+              시뮬레이션합니다.
+            </p>
           </div>
 
-          <div className="form-group">
-            <label>사용자 프로필</label>
+          {configError && (
+            <div className="inline-notice inline-notice-warning">
+              {configError}
+            </div>
+          )}
+
+          <section className="control-section">
+            <div className="section-title-row">
+              <div>
+                <span className="section-number">01</span>
+                <h3>사용자 유형</h3>
+              </div>
+            </div>
 
             <div className="profile-grid">
-              {profileOptions.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  className={`profile-card ${
-                    profile === option.value ? "selected" : ""
-                  }`}
-                  onClick={() => {
-                    setProfile(option.value);
-                    resetSimulation();
-                  }}
-                >
-                  <span className="profile-icon">{option.icon}</span>
-                  <span>{option.label}</span>
-                </button>
-              ))}
+              {config.profiles.map((item) => {
+                const meta =
+                  PROFILE_META[item.value] ?? PROFILE_META.일반;
+
+                const isSelected = profile === item.value;
+
+                return (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={[
+                      "profile-card",
+                      isSelected ? "is-selected" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    onClick={() => setProfile(item.value)}
+                    disabled={isConfigLoading}
+                  >
+                    <span className="profile-icon">{meta.icon}</span>
+
+                    <span className="profile-copy">
+                      <strong>{meta.title}</strong>
+                      <small>{meta.description}</small>
+                    </span>
+
+                    <span
+                      className="selection-check"
+                      aria-hidden="true"
+                    >
+                      ✓
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="control-section">
+            <div className="section-title-row">
+              <div>
+                <span className="section-number">02</span>
+                <h3>이동 우선순위</h3>
+              </div>
             </div>
 
-            <div className="profile-description">
-              <span>{selectedProfile.icon}</span>
-              <p>{selectedProfile.description}</p>
+            <div className="mode-grid">
+              {config.modes.map((item) => {
+                const meta =
+                  MODE_META[item] ?? MODE_META.빠른도착;
+
+                const isSelected = mode === item;
+
+                return (
+                  <button
+                    key={item}
+                    type="button"
+                    className={[
+                      "mode-card",
+                      isSelected ? "is-selected" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    onClick={() => setMode(item)}
+                    disabled={isConfigLoading}
+                  >
+                    <span className="mode-icon">{meta.icon}</span>
+
+                    <span>
+                      <strong>{meta.title}</strong>
+                      <small>{meta.description}</small>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          </div>
+          </section>
 
-          <div className="form-group">
-            <label>어떤 경로를 원하시나요?</label>
-
-            <div className="priority-grid">
-              {priorityOptions.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  className={`priority-card ${
-                    priority === option.value ? "selected" : ""
-                  }`}
-                  onClick={() => {
-                    setPriority(option.value);
-                    resetSimulation();
-                  }}
-                >
-                  <span className="priority-icon">{option.icon}</span>
-
-                  <span className="priority-text">
-                    <strong>{option.title}</strong>
-                    <small>{option.description}</small>
-                  </span>
-                </button>
-              ))}
+          <section className="control-section">
+            <div className="section-title-row">
+              <div>
+                <span className="section-number">03</span>
+                <h3>출발지와 목적지</h3>
+              </div>
             </div>
-          </div>
 
-          <div className="location-group">
-            <div className="form-group">
-              <label htmlFor="start-location">출발지</label>
+            <label className="field-group">
+              <span>출발지</span>
 
               <select
-                id="start-location"
-                value={startLocation}
-                onChange={(event) => {
-                  setStartLocation(event.target.value);
-                  resetSimulation();
-                }}
+                value={startLocationId}
+                onChange={(event) =>
+                  setStartLocationId(event.target.value)
+                }
+                disabled={isConfigLoading}
               >
-                {locations.map((location) => (
-                  <option key={location.value} value={location.value}>
-                    {location.floor}층 · {location.label}
-                  </option>
+                {groupedStartLocations.map((group) => (
+                  <optgroup
+                    key={String(group.floor)}
+                    label={
+                      group.floor === "외부"
+                        ? "건물 외부·외곽"
+                        : `${group.floor}층`
+                    }
+                  >
+                    {group.locations.map((location) => (
+                      <option
+                        key={location.location_id}
+                        value={location.location_id}
+                      >
+                        {location.label}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
+            </label>
+
+            <div className="direction-arrow" aria-hidden="true">
+              ↓
             </div>
 
-            <div className="route-arrow">↓</div>
+            <label className="field-group">
+              <span>목적지</span>
 
-            <div className="form-group">
-              <label htmlFor="destination">목적지</label>
-
-              <select
-                id="destination"
-                value={destination}
-                onChange={(event) => {
-                  setDestination(event.target.value);
-                  resetSimulation();
-                }}
-              >
-                {locations.map((location) => (
-                  <option key={location.value} value={location.value}>
-                    {location.floor}층 · {location.label}
-                  </option>
-                ))}
+              <select value={config.destination.node_id} disabled>
+                <option value={config.destination.node_id}>
+                  {config.destination.floor}층 ·{" "}
+                  {config.destination.label}
+                </option>
               </select>
-            </div>
-          </div>
+            </label>
+          </section>
 
           <button
             type="button"
-            className="simulate-button"
+            className="simulation-button"
             onClick={handleSimulation}
+            disabled={isRouteLoading || isConfigLoading}
           >
-            경로 시뮬레이션 실행
+            {isRouteLoading ? (
+              <>
+                <span className="button-spinner" />
+                실제 경로 계산 중...
+              </>
+            ) : (
+              <>
+                <span>경로 시뮬레이션 실행</span>
+                <span aria-hidden="true">→</span>
+              </>
+            )}
           </button>
 
-          <div className="current-setting">
-            <strong>현재 설정</strong>
-            <p>
-              {selectedProfile.icon} {selectedProfile.label}
-            </p>
-            <p>
-              {selectedPriority.icon} {selectedPriority.title}
-            </p>
+          <div className="current-settings-card">
+            <p>현재 설정</p>
+
+            <dl>
+              <div>
+                <dt>사용자</dt>
+                <dd>
+                  {selectedProfileMeta.icon}{" "}
+                  {selectedProfileMeta.title}
+                </dd>
+              </div>
+
+              <div>
+                <dt>우선순위</dt>
+                <dd>{selectedModeMeta.title}</dd>
+              </div>
+
+              <div>
+                <dt>출발</dt>
+                <dd>{selectedStart?.label ?? "선택 없음"}</dd>
+              </div>
+
+              <div>
+                <dt>도착</dt>
+                <dd>{config.destination.label}</dd>
+              </div>
+            </dl>
           </div>
+        </aside>
 
-          <p className="input-note">
-            현재는 UI 검증용 가상 데이터입니다. 추후 팀원의 실제 그래프·경로
-            계산 API 응답으로 교체할 예정입니다.
-          </p>
-        </section>
-
-        <section className="panel result-panel">
-          <div className="map-header">
-            <div>
-              <p className="map-label">경삼관 실내 디지털 트윈</p>
-              <h2>{selectedFloor}층 지도</h2>
-            </div>
-
-            <div className="floor-tabs">
-              {[1, 2, 3, 4].map((floor) => (
+        <section className="content-panel">
+          <div className="map-panel">
+            <div className="floor-tabs" role="tablist">
+              {FLOOR_ORDER.map((floor) => (
                 <button
-                  type="button"
                   key={floor}
-                  className={selectedFloor === floor ? "active" : ""}
-                  onClick={() => setSelectedFloor(floor)}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeFloor === floor}
+                  className={[
+                    "floor-tab",
+                    activeFloor === floor ? "is-active" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  onClick={() => setActiveFloor(floor)}
                 >
-                  {floor}F
+                  {floor}층
                 </button>
               ))}
             </div>
+
+            <FloorMap
+              floor={activeFloor}
+              routePath={selectedRoute?.path ?? []}
+              routeColor={selectedRouteColor}
+            />
           </div>
 
-          <FloorMap
-            floor={selectedFloor}
-            activeRoute={selectedRoute}
-            startLocation={startLocation}
-            destination={destination}
-            hasSimulation={hasSimulation}
-          />
+          {routeError && (
+            <div className="result-error-card">
+              <strong>경로를 불러오지 못했습니다.</strong>
+              <p>{routeError}</p>
+              <small>
+                `python api_server.py`가 실행 중인지 확인해 주세요.
+              </small>
+            </div>
+          )}
 
-          {!hasSimulation ? (
-            <div className="map-empty-message">
-              <span>🧭</span>
+          {!routeError && routes.length === 0 && (
+            <div className="empty-result-card">
+              <div className="empty-result-icon">🧭</div>
+
               <div>
-                <strong>출발지와 목적지를 선택해 주세요.</strong>
+                <h2>아직 시뮬레이션 결과가 없어요</h2>
+
                 <p>
-                  선택한 목적지가 있는 층의 지도를 먼저 보여주며, 시뮬레이션
-                  실행 후 추천 경로가 지도 위에 표시됩니다.
+                  왼쪽에서 사용자 유형과 이동 조건을 선택한 후
+                  경로 시뮬레이션을 실행해 주세요.
                 </p>
               </div>
             </div>
-          ) : (
+          )}
+
+          {routes.length > 0 && selectedRoute && (
             <div className="simulation-results">
-              <section className="route-choice-section">
-                <div className="result-title-row">
+              <section className="route-candidate-section">
+                <div className="result-section-heading">
                   <div>
-                    <p className="result-label">추천 경로 후보</p>
-                    <h3>원하는 경로를 선택해 비교해 보세요.</h3>
+                    <span className="result-eyebrow">
+                      추천 경로 후보
+                    </span>
+
+                    <h2>원하는 경로를 선택해 비교해 보세요.</h2>
                   </div>
 
-                  <span>{routeOptions.length}개 경로</span>
+                  <span className="route-count">
+                    {routes.length}개 경로
+                  </span>
                 </div>
 
-                <div className="route-options">
-                  {routeOptions.map((route) => (
-                    <button
-                      type="button"
-                      key={route.id}
-                      className={`route-option ${
-                        selectedRoute?.id === route.id ? "selected" : ""
-                      }`}
-                      onClick={() => {
-                        setSelectedRouteId(route.id);
-                        setSelectedFloor(getLocation(destination).floor);
-                      }}
-                    >
-                      <div className="route-option-top">
-                        <span className="route-method-icon">{route.icon}</span>
-                        <span className="route-tag">{route.tag}</span>
-                      </div>
+                <div className="route-card-grid">
+                  {routes.map((route, index) => {
+                    const isSelected =
+                      selectedRouteIndex === index;
 
-                      <strong>{route.title}</strong>
-                      <p>{route.subtitle}</p>
+                    const routeSafetyScore =
+                      calculateSafetyScore(route);
 
-                      <div className="route-meta">
-                        <span>⏱ {formatTime(route.totalSeconds)}</span>
-                        <span>🛡 {route.safetyScore}점</span>
-                      </div>
-                    </button>
-                  ))}
+                    return (
+                      <button
+                        key={route.id ?? `route-${index}`}
+                        type="button"
+                        className={[
+                          "route-candidate-card",
+                          isSelected ? "is-selected" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        style={{
+                          "--route-color": ROUTE_COLORS[index],
+                        }}
+                        onClick={() => handleRouteSelect(index)}
+                      >
+                        <div className="route-card-top">
+                          <span
+                            className="route-color-dot"
+                            aria-hidden="true"
+                          />
+
+                          <span className="route-rank">
+                            {index === 0
+                              ? mode === "빠른도착"
+                                ? "최단 시간"
+                                : "가장 편한 경로"
+                              : `${index + 1}순위`}
+                          </span>
+                        </div>
+
+                        <strong>{getRouteTitle(route, index)}</strong>
+
+                        <p>
+                          {route.path_labels?.[0]} →{" "}
+                          {route.path_labels?.[
+                            route.path_labels.length - 1
+                          ]}
+                        </p>
+
+                        <div className="route-card-metrics">
+                          <span>
+                            ⏱ {formatDuration(route.estimated_seconds)}
+                          </span>
+
+                          <span>
+                            📏 {route.summary.total_distance_m}m
+                          </span>
+
+                          <span>🛡 {routeSafetyScore}점</span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
 
-              <section className="selected-route-summary">
+              <section className="selected-route-banner">
                 <div>
                   <span>선택된 경로</span>
-                  <strong>{selectedRoute.title}</strong>
+                  <strong>
+                    {getRouteTitle(
+                      selectedRoute,
+                      selectedRouteIndex,
+                    )}
+                  </strong>
+
                   <p>
-                    {getLocation(startLocation).label} →{" "}
-                    {getLocation(destination).label}
+                    {selectedStart?.label} →{" "}
+                    {config.destination.label}
                   </p>
                 </div>
 
-                <span className="selected-route-icon">{selectedRoute.icon}</span>
+                <div
+                  className="selected-route-symbol"
+                  style={{
+                    backgroundColor: selectedRouteColor,
+                  }}
+                  aria-hidden="true"
+                >
+                  {selectedRouteIndex + 1}
+                </div>
               </section>
 
-              <div className="metric-grid">
-                <article className="metric-card">
-                  <span>총 소요 시간</span>
-                  <strong>{formatTime(selectedRoute.totalSeconds)}</strong>
-                  <p>현재 더미데이터 기준 예상값</p>
+              <section className="summary-grid">
+                <article className="summary-card">
+                  <span className="summary-icon">⏱</span>
+                  <p>총 소요 시간</p>
+                  <strong>
+                    {formatDuration(
+                      selectedRoute.estimated_seconds,
+                    )}
+                  </strong>
                 </article>
 
-                <article className="metric-card">
-                  <span>경로 안전도</span>
-                  <strong>{selectedRoute.safetyScore}점</strong>
-                  <p>100점 만점의 가상 점수</p>
+                <article className="summary-card">
+                  <span className="summary-icon">📏</span>
+                  <p>총 이동 거리</p>
+                  <strong>
+                    {selectedRoute.summary.total_distance_m}m
+                  </strong>
                 </article>
-              </div>
 
-              <section className="result-section">
-                <div className="result-title-row">
-                  <div>
-                    <p className="result-label">구간별 이동</p>
+                <article className="summary-card">
+                  <span className="summary-icon">🪜</span>
+                  <p>총 계단 수</p>
+                  <strong>
+                    {selectedRoute.summary.total_stairs}칸
+                  </strong>
+                </article>
+
+                <article className="summary-card">
+                  <span className="summary-icon">🛡</span>
+                  <p>경로 안전도</p>
+                  <strong>{safetyScore}점</strong>
+                  <small>{getSafetyLabel(safetyScore)}</small>
+                </article>
+              </section>
+
+              <section className="result-detail-grid">
+                <article className="result-card timeline-card">
+                  <div className="card-heading">
+                    <span>구간별 이동</span>
                     <h3>이동 타임라인</h3>
                   </div>
 
-                  <span>{timeline.length}개 구간</span>
-                </div>
-
-                <ol className="timeline">
-                  {timeline.map((step, index) => (
-                    <li
-                      key={`${step.title}-${index}`}
-                      className="timeline-item"
-                    >
-                      <div className="timeline-marker">
-                        {stepIcons[step.type]}
-                      </div>
-
-                      <div className="timeline-content">
-                        <div className="timeline-top">
-                          <strong>{step.title}</strong>
-                          <span>{step.time}</span>
+                  <ol className="timeline-list">
+                    {selectedRoute.details.map((detail, index) => (
+                      <li
+                        key={`${detail.from}-${detail.to}-${index}`}
+                        className="timeline-item"
+                      >
+                        <div className="timeline-marker">
+                          <span>{getEdgeIcon(detail.edge_type)}</span>
                         </div>
 
-                        <p>{step.description}</p>
+                        <div className="timeline-copy">
+                          <div className="timeline-title-row">
+                            <strong>
+                              {detail.from_label} → {detail.to_label}
+                            </strong>
+
+                            <span>{detail.distance_m}m</span>
+                          </div>
+
+                          <p>
+                            {detail.edge_type || "이동 구간"}
+                          </p>
+
+                          <div className="timeline-tags">
+                            {Number(detail.stairs_count) > 0 && (
+                              <span className="timeline-tag tag-stairs">
+                                계단 {detail.stairs_count}칸
+                              </span>
+                            )}
+
+                            {detail.step_height === "미니" && (
+                              <span className="timeline-tag tag-threshold-mini">
+                                턱 미니
+                              </span>
+                            )}
+
+                            {detail.step_height === "중간" && (
+                              <span className="timeline-tag tag-threshold-medium">
+                                턱 중간
+                              </span>
+                            )}
+
+                            {detail.door_type &&
+                              detail.door_type !== "없음" && (
+                                <span className="timeline-tag">
+                                  {detail.door_type}
+                                </span>
+                              )}
+                          </div>
+
+                          {detail.obstacle_info &&
+                            detail.obstacle_info !== "없음" && (
+                              <p className="timeline-warning">
+                                주의: {detail.obstacle_info}
+                              </p>
+                            )}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </article>
+
+                <div className="result-side-column">
+                  <article className="result-card reason-card">
+                    <div className="card-heading">
+                      <span>경로 선택 근거</span>
+                      <h3>추천 사유</h3>
+                    </div>
+
+                    <p className="reason-text">
+                      {selectedRoute.recommendation_reason}
+                    </p>
+
+                    <div className="reason-meta">
+                      <span>
+                        {selectedProfileMeta.icon}{" "}
+                        {selectedProfileMeta.title}
+                      </span>
+
+                      <span>{selectedModeMeta.icon}</span>
+                    </div>
+                  </article>
+
+                  <article className="result-card warning-card">
+                    <div className="card-heading">
+                      <span>이동 전 확인</span>
+                      <h3>주의 요소</h3>
+                    </div>
+
+                    {selectedRoute.warnings?.length > 0 ? (
+                      <ul className="warning-list">
+                        {selectedRoute.warnings.map(
+                          (warning, index) => (
+                            <li key={`${warning}-${index}`}>
+                              <span aria-hidden="true">!</span>
+                              <p>{warning}</p>
+                            </li>
+                          ),
+                        )}
+                      </ul>
+                    ) : (
+                      <div className="no-warning">
+                        <span>✓</span>
+                        <p>
+                          현재 경로에서 별도의 주요 주의 요소가
+                          확인되지 않았습니다.
+                        </p>
                       </div>
-                    </li>
-                  ))}
-                </ol>
-              </section>
-
-              <section className="result-section">
-                <p className="result-label">이동 전 확인</p>
-                <h3>주의 요소</h3>
-
-                <ul className="warning-list">
-                  {selectedRoute.warnings.map((warning) => (
-                    <li key={warning}>⚠️ {warning}</li>
-                  ))}
-                </ul>
-              </section>
-
-              <section className="ai-reason">
-                <div className="ai-title">
-                  <span>AI</span>
-                  <h3>한국어 추천 사유</h3>
+                    )}
+                  </article>
                 </div>
-
-                <p>{recommendationReason}</p>
-
-                <small>
-                  현재 문장은 생성형 AI 연결 전의 가상 문장입니다. 추후 실제
-                  AI 응답으로 교체됩니다.
-                </small>
               </section>
             </div>
           )}
