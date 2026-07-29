@@ -29,7 +29,6 @@ const DEFAULT_CONFIG = {
     { location_id: "central_corridor_1f", label: "1층 중앙 연결통로", floor: 1, route_node_id: "1층_중앙복도(연결통로)" },
     { location_id: "west_1f_stairs", label: "서관 1층 계단 앞", floor: 1, route_node_id: "서관_1층_계단앞" },
     { location_id: "east_1f_stairs", label: "동관 1층 계단 앞", floor: 1, route_node_id: "동관_1층_계단앞" },
-    { location_id: "reading_stairs_1f", label: "열람실 계단", floor: 1, route_node_id: "열람실_긴계단_아래(동관쪽길)" },
     { location_id: "teaching_support_center", label: "교수학습지원센터", floor: 2, route_node_id: "서관_2층_계단앞" },
     { location_id: "university_admin_team", label: "대학행정팀", floor: 2, route_node_id: "서관_2층_엘리베이터앞" },
     { location_id: "central_library_room_1", label: "중앙 도서관(자료실 1)", floor: 2, route_node_id: "서관_2층_엘리베이터앞" },
@@ -45,8 +44,8 @@ const DEFAULT_CONFIG = {
     { location_id: "west_3f_elevator", label: "서관 3층 엘리베이터 앞", floor: 3, route_node_id: "서관_3층_엘리베이터앞" },
     { location_id: "reading_stairs_3f_entrance", label: "3층 열람실 계단 입구", floor: 3, route_node_id: "3층_쪽계단위" },
     { location_id: "book_cafe", label: "북카페", floor: 4, route_node_id: "서관_3층_엘리베이터앞" },
-    { location_id: "parking_stairs", label: "주차장쪽 계단", floor: "외부", route_node_id: "주차장쪽_시작노드" },
-    { location_id: "side_road_entrance", label: "쪽길 입구", floor: "외부", route_node_id: "쪽길_시작노드(개구멍)" },
+    { location_id: "parking_stairs", label: "주차장쪽 계단", floor: 1, route_node_id: "주차장쪽_시작노드" },
+{ location_id: "side_road_entrance", label: "쪽길 입구", floor: 1, route_node_id: "쪽길_시작노드(개구멍)" },
   ],
   destination: {
     node_id: "3층_열람실_입구",
@@ -54,38 +53,6 @@ const DEFAULT_CONFIG = {
     floor: 3,
   },
 };
-
-const REQUIRED_START_LOCATIONS = [
-  {
-    location_id: "reading_stairs_1f",
-    label: "열람실 계단",
-    floor: 1,
-    route_node_id: "열람실_긴계단_아래(동관쪽길)",
-  },
-];
-
-function mergeStartLocations(apiLocations) {
-  const baseLocations =
-    Array.isArray(apiLocations) && apiLocations.length > 0
-      ? apiLocations
-      : DEFAULT_CONFIG.start_locations;
-
-  const locationMap = new Map(
-    baseLocations.map((location) => [
-      location.location_id,
-      location,
-    ]),
-  );
-
-  REQUIRED_START_LOCATIONS.forEach((location) => {
-    locationMap.set(location.location_id, {
-      ...locationMap.get(location.location_id),
-      ...location,
-    });
-  });
-
-  return Array.from(locationMap.values());
-}
 
 const PROFILE_META = {
   일반: {
@@ -419,9 +386,11 @@ function App() {
               ? data.modes
               : DEFAULT_CONFIG.modes,
 
-          start_locations: mergeStartLocations(
-            data.start_locations,
-          ),
+          start_locations:
+            Array.isArray(data.start_locations) &&
+            data.start_locations.length > 0
+              ? data.start_locations
+              : DEFAULT_CONFIG.start_locations,
 
           destination:
             data.destination ?? DEFAULT_CONFIG.destination,
@@ -436,12 +405,7 @@ function App() {
       } catch (error) {
         console.error(error);
 
-        setConfig({
-          ...DEFAULT_CONFIG,
-          start_locations: mergeStartLocations(
-            DEFAULT_CONFIG.start_locations,
-          ),
-        });
+        setConfig(DEFAULT_CONFIG);
         setConfigError(
           "API 설정을 불러오지 못해 기본 설정을 표시하고 있습니다.",
         );
@@ -469,7 +433,6 @@ function App() {
 
         body: JSON.stringify({
           start_location_id: startLocationId,
-          start_node_id: selectedStart?.route_node_id,
           end: config.destination.node_id,
           profile,
           mode,

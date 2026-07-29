@@ -3,6 +3,7 @@
 import {
   MAP_SIZE,
   getFloorMap,
+  getNodePosition,
   getPathNodesForFloor,
 } from "../mapData";
 
@@ -15,15 +16,387 @@ const FLOOR_IMAGE_PATHS = {
 
 /*
  * 지도 확대 배율
- *
- * 1.15 = 15% 확대
- * 1.25 = 25% 확대
- * 1.35 = 35% 확대
  */
 const MAP_ZOOM = 1.25;
 
+/*
+ * 층별 이동시설 기본 위치
+ *
+ * 해당 층의 실제 노드 좌표를 찾지 못했을 때만
+ * 아래 좌표를 대체값으로 사용합니다.
+ */
+const TRANSITION_FALLBACK_POSITIONS = {
+  elevator: {
+    1: { x: 790, y: 335 },
+    2: { x: 790, y: 335 },
+    3: { x: 790, y: 340 },
+    4: { x: 790, y: 340 },
+  },
+
+  stairs: {
+    1: { x: 700, y: 325 },
+    2: { x: 700, y: 285 },
+    3: { x: 700, y: 330 },
+    4: { x: 700, y: 330 },
+  },
+};
+
 /* =========================================================
-   경로 표시
+   이동수단 판별
+========================================================= */
+
+function getTransitionType(startNodeId, endNodeId) {
+  const combinedId = `${startNodeId ?? ""} ${endNodeId ?? ""}`;
+
+  if (
+    combinedId.includes("엘리베이터") ||
+    combinedId.toLowerCase().includes("elevator")
+  ) {
+    return "elevator";
+  }
+
+  if (
+    combinedId.includes("계단") ||
+    combinedId.toLowerCase().includes("stairs")
+  ) {
+    return "stairs";
+  }
+
+  return "floor-transition";
+}
+
+/* =========================================================
+   현재 층에서 사용할 이동시설 위치 찾기
+========================================================= */
+
+function getTransitionPosition(floor, transitionType, routePath = []) {
+  /*
+   * mapData.js에 실제 해당 층 노드가 있으면
+   * 그 좌표를 가장 먼저 사용합니다.
+   */
+  const usesReadingRoomSideStairs = routePath.some((nodeId) =>
+    [
+      "쪽길_시작노드(개구멍)",
+      "쪽계단_아래",
+      "열람실_긴계단_아래(동관쪽길)",
+      "구름다리_입구",
+      "구름다리_출구(서관2층)",
+      "3층_쪽계단위",
+    ].includes(nodeId),
+  );
+
+  let candidateNodeIds;
+
+  if (transitionType === "elevator") {
+    candidateNodeIds = [
+      `서관_${floor}층_엘리베이터앞`,
+      `${floor}층_엘리베이터앞`,
+      `동관_${floor}층_엘리베이터앞`,
+    ];
+  } else if (usesReadingRoomSideStairs) {
+    const readingRoomStairNodesByFloor = {
+      1: [
+        "열람실_긴계단_아래(동관쪽길)",
+        "쪽계단_아래",
+      ],
+      2: ["구름다리_출구(서관2층)"],
+      3: ["3층_쪽계단위"],
+    };
+
+    candidateNodeIds = readingRoomStairNodesByFloor[floor] ?? [];
+  } else {
+    candidateNodeIds = [
+      `서관_${floor}층_계단앞`,
+      `동관_${floor}층_계단앞`,
+      `${floor}층_계단앞`,
+    ];
+  }
+
+  for (const nodeId of candidateNodeIds) {
+    const position = getNodePosition(nodeId);
+
+    if (position && position.floor === floor) {
+      return {
+        x: position.x,
+        y: position.y,
+      };
+    }
+  }
+
+  /*
+   * 실제 노드를 찾지 못하면 기본 좌표 사용
+   */
+  return (
+    TRANSITION_FALLBACK_POSITIONS[transitionType]?.[floor] ??
+    TRANSITION_FALLBACK_POSITIONS.elevator[floor] ?? {
+      x: 790,
+      y: 340,
+    }
+  );
+}
+
+/* =========================================================
+   현재 층이 중간 통과층인지 확인
+========================================================= */
+
+function getIntermediateFloorTransition(routePath, floor) {
+  if (!Array.isArray(routePath) || routePath.length < 2) {
+    return null;
+  }
+
+  for (let index = 0; index < routePath.length - 1; index += 1) {
+    const startNodeId = routePath[index];
+    const endNodeId = routePath[index + 1];
+
+    const startPosition = getNodePosition(startNodeId);
+    const endPosition = getNodePosition(endNodeId);
+
+    if (!startPosition || !endPosition) {
+      continue;
+    }
+
+    if (startPosition.floor === endPosition.floor) {
+      continue;
+    }
+
+    const lowerFloor = Math.min(
+      startPosition.floor,
+      endPosition.floor,
+    );
+
+    const upperFloor = Math.max(
+      startPosition.floor,
+      endPosition.floor,
+    );
+
+    /*
+     * 출발층과 도착층 사이에 있는 층만
+     * 중간 통과층으로 처리합니다.
+     *
+     * 예:
+     * 1층 → 3층
+     * 현재 floor가 2라면 중간층
+     */
+    const isIntermediateFloor =
+      floor > lowerFloor && floor < upperFloor;
+
+    if (!isIntermediateFloor) {
+      continue;
+    }
+
+    const transitionType = getTransitionType(
+      startNodeId,
+      endNodeId,
+    );
+
+    return {
+      type: transitionType,
+      direction:
+        endPosition.floor > startPosition.floor
+          ? "up"
+          : "down",
+      fromFloor: startPosition.floor,
+      toFloor: endPosition.floor,
+      position: getTransitionPosition(
+        floor,
+        transitionType,
+        routePath,
+      ),
+    };
+  }
+
+  return null;
+}
+
+/* =========================================================
+   움직이는 중간층 표시
+========================================================= */
+
+function IntermediateFloorMarker({
+  transition,
+  routeColor,
+}) {
+  if (!transition) {
+    return null;
+  }
+
+  const { type, direction, position, fromFloor, toFloor } =
+    transition;
+
+  const isElevator = type === "elevator";
+  const isStairs = type === "stairs";
+
+  const label = isElevator
+    ? "엘리베이터 이동 중"
+    : isStairs
+      ? "계단 이동 중"
+      : "층간 이동 중";
+
+  const icon = isElevator
+    ? "↕"
+    : direction === "up"
+      ? "↑"
+      : "↓";
+
+  return (
+    <g className="intermediate-floor-layer">
+      <style>
+        {`
+          @keyframes pathTwinTransitPulse {
+            0% {
+              opacity: 0.45;
+              transform: scale(0.86);
+            }
+
+            50% {
+              opacity: 1;
+              transform: scale(1.12);
+            }
+
+            100% {
+              opacity: 0.45;
+              transform: scale(0.86);
+            }
+          }
+
+          @keyframes pathTwinTransitDash {
+            to {
+              stroke-dashoffset: -28;
+            }
+          }
+
+          .path-twin-transit-pulse {
+            transform-box: fill-box;
+            transform-origin: center;
+            animation:
+              pathTwinTransitPulse 1.35s
+              ease-in-out infinite;
+          }
+
+          .path-twin-transit-line {
+            animation:
+              pathTwinTransitDash 0.9s
+              linear infinite;
+          }
+        `}
+      </style>
+
+      {/*
+        이동시설을 통과 중이라는 짧은 점선
+      */}
+      <line
+        x1={position.x}
+        y1={position.y - 38}
+        x2={position.x}
+        y2={position.y + 38}
+        stroke="rgba(255,255,255,0.98)"
+        strokeWidth="15"
+        strokeLinecap="round"
+      />
+
+      <line
+        x1={position.x}
+        y1={position.y - 38}
+        x2={position.x}
+        y2={position.y + 38}
+        stroke={routeColor}
+        strokeWidth="8"
+        strokeLinecap="round"
+        strokeDasharray="15 9"
+        className="path-twin-transit-line"
+      />
+
+      {/*
+        이동시설 중앙의 움직이는 빨간 마커
+      */}
+      <g className="path-twin-transit-pulse">
+        <circle
+          cx={position.x}
+          cy={position.y}
+          r="15"
+          fill="#ffffff"
+          stroke={routeColor}
+          strokeWidth="4"
+        />
+
+        <circle
+          cx={position.x}
+          cy={position.y}
+          r="9"
+          fill={routeColor}
+        />
+      </g>
+
+      {/*
+        위아래 이동 아이콘
+      */}
+      <g>
+        <rect
+          x={position.x - 17}
+          y={position.y - 68}
+          width="34"
+          height="27"
+          rx="9"
+          fill="#ffffff"
+          stroke={routeColor}
+          strokeWidth="2.5"
+        />
+
+        <text
+          x={position.x}
+          y={position.y - 49}
+          textAnchor="middle"
+          fill={routeColor}
+          fontSize="18"
+          fontWeight="900"
+        >
+          {icon}
+        </text>
+      </g>
+
+      {/*
+        이동 중 안내문
+      */}
+      <g>
+        <rect
+          x={position.x - 75}
+          y={position.y + 49}
+          width="150"
+          height="50"
+          rx="16"
+          fill="#ffffff"
+          stroke={routeColor}
+          strokeWidth="2.5"
+        />
+
+        <text
+          x={position.x}
+          y={position.y + 70}
+          textAnchor="middle"
+          fill="#202331"
+          fontSize="14"
+          fontWeight="900"
+        >
+          {label}
+        </text>
+
+        <text
+          x={position.x}
+          y={position.y + 88}
+          textAnchor="middle"
+          fill="#747d92"
+          fontSize="11"
+          fontWeight="800"
+        >
+          {fromFloor}층 → {toFloor}층
+        </text>
+      </g>
+    </g>
+  );
+}
+
+/* =========================================================
+   실제 경로 표시
 ========================================================= */
 
 function RouteLayer({
@@ -31,22 +404,50 @@ function RouteLayer({
   floor,
   routeColor = "#e85b55",
 }) {
-  const pathNodes = getPathNodesForFloor(routePath, floor);
+  const pathNodes = getPathNodesForFloor(
+    routePath,
+    floor,
+  );
 
-  if (pathNodes.length === 0) {
+  /*
+   * 현재 층에 실제 노드는 없지만
+   * 다른 층으로 이동하면서 지나가는 층인지 검사
+   */
+  const intermediateTransition =
+    getIntermediateFloorTransition(routePath, floor);
+
+  const globalStartNodeId =
+    routePath.length > 0 ? routePath[0] : null;
+
+  const globalDestinationNodeId =
+    routePath.length > 0
+      ? routePath[routePath.length - 1]
+      : null;
+
+  /*
+   * 현재 층에 실제 경로가 없는 경우에도
+   * 중간층 표시가 있으면 렌더링합니다.
+   */
+  if (
+    pathNodes.length === 0 &&
+    !intermediateTransition
+  ) {
     return null;
   }
 
-  /*
-   * 중간 꺾임점을 포함한 전체 좌표
-   */
+  if (pathNodes.length === 0) {
+    return (
+      <IntermediateFloorMarker
+        transition={intermediateTransition}
+        routeColor={routeColor}
+      />
+    );
+  }
+
   const points = pathNodes
     .map((node) => `${node.x},${node.y}`)
     .join(" ");
 
-  /*
-   * 움직이는 동그라미가 따라갈 SVG 경로
-   */
   const pathData = pathNodes
     .map((node, index) => {
       const command = index === 0 ? "M" : "L";
@@ -55,45 +456,16 @@ function RouteLayer({
     })
     .join(" ");
 
-  /*
-   * 화면용 꺾임점이 아닌 실제 백엔드 노드만 추출
-   */
   const realNodes = pathNodes.filter(
     (node) => !node.isWaypoint,
   );
 
-  /*
-   * 전체 경로의 진짜 출발 노드와 진짜 목적지 노드
-   *
-   * 예:
-   * 전체 경로가
-   * 1층 출발 → 1층 엘리베이터 → 3층 엘리베이터 → 열람실
-   *
-   * 이라면:
-   * globalStartNodeId = 1층 출발점
-   * globalDestinationNodeId = 3층 열람실
-   */
-  const globalStartNodeId = routePath[0] ?? null;
-
-  const globalDestinationNodeId =
-    routePath.length > 0
-      ? routePath[routePath.length - 1]
-      : null;
-
-  /*
-   * 현재 층에 전체 경로의 진짜 출발점이 있는지 확인
-   */
   const startNode =
     realNodes.find(
-      (node) => node.nodeId === globalStartNodeId,
+      (node) =>
+        node.nodeId === globalStartNodeId,
     ) ?? null;
 
-  /*
-   * 현재 층에 전체 경로의 진짜 목적지가 있는지 확인
-   *
-   * 따라서 1층 엘리베이터 앞에는 도착이 표시되지 않고,
-   * 최종 목적지인 3층 노트북 열람실에만 도착이 표시됩니다.
-   */
   const destinationNode =
     realNodes.find(
       (node) =>
@@ -102,9 +474,6 @@ function RouteLayer({
 
   return (
     <g className="route-layer">
-      {/*
-        움직이는 점선 애니메이션
-      */}
       <style>
         {`
           @keyframes pathTwinDashMove {
@@ -114,13 +483,16 @@ function RouteLayer({
           }
 
           .path-twin-route-line {
-            animation: pathTwinDashMove 1.05s linear infinite;
+            animation:
+              pathTwinDashMove 1.05s
+              linear infinite;
           }
 
           .path-twin-moving-marker {
             filter:
               drop-shadow(
-                0 2px 3px rgba(31, 39, 72, 0.28)
+                0 2px 3px
+                rgba(31, 39, 72, 0.28)
               );
           }
         `}
@@ -129,10 +501,7 @@ function RouteLayer({
       {pathNodes.length >= 2 && (
         <>
           {/*
-            경로 아래의 흰색 테두리
-
-            지도 글자나 방 테두리 위에서도
-            경로가 잘 보이게 합니다.
+            흰색 외곽선
           */}
           <polyline
             points={points}
@@ -144,7 +513,7 @@ function RouteLayer({
           />
 
           {/*
-            실제 움직이는 점선 경로
+            움직이는 빨간 점선
           */}
           <polyline
             points={points}
@@ -158,7 +527,7 @@ function RouteLayer({
           />
 
           {/*
-            경로를 따라 움직이는 작은 마커
+            경로를 따라 움직이는 작은 점
           */}
           <circle
             r="5.5"
@@ -177,9 +546,7 @@ function RouteLayer({
       )}
 
       {/*
-        실제 전체 경로의 출발점이 현재 층에 있을 때만 표시
-
-        1층 출발이라면 1층에만 표시됩니다.
+        전체 경로의 진짜 출발지에서만 표시
       */}
       {startNode && (
         <g className="route-start-marker">
@@ -204,10 +571,7 @@ function RouteLayer({
       )}
 
       {/*
-        전체 경로의 최종 목적지가 현재 층에 있을 때만 표시
-
-        목적지가 3층 노트북 열람실이라면
-        1층과 2층에는 절대 도착이 뜨지 않습니다.
+        전체 경로의 최종 목적지에서만 표시
       */}
       {destinationNode && (
         <g className="route-destination-marker">
@@ -229,6 +593,18 @@ function RouteLayer({
             도착
           </text>
         </g>
+      )}
+
+      {/*
+        현재 층에 실제 경로도 있고,
+        동시에 더 위/아래 층으로 이동 중인 정보가 있다면
+        이동시설 표시도 함께 출력합니다.
+      */}
+      {intermediateTransition && (
+        <IntermediateFloorMarker
+          transition={intermediateTransition}
+          routeColor={routeColor}
+        />
       )}
     </g>
   );
@@ -341,9 +717,7 @@ function MapLegend() {
       className="map-legend"
       aria-label="지도 범례"
     >
-      <strong className="map-legend-title">
-        범례
-      </strong>
+      
 
       <div className="map-legend-list">
         <div className="map-legend-item">
@@ -371,7 +745,7 @@ function MapLegend() {
 }
 
 /* =========================================================
-   FloorMap 컴포넌트
+   FloorMap
 ========================================================= */
 
 export default function FloorMap({
@@ -388,9 +762,6 @@ export default function FloorMap({
 
   return (
     <section className="floor-map-section">
-      {/*
-        지도 제목
-      */}
       <div className="floor-map-header">
         <div>
           <p className="floor-map-eyebrow">
@@ -401,12 +772,6 @@ export default function FloorMap({
             {map?.title ??
               `경삼관 ${floor}층`}
           </h2>
-
-          {map?.description && (
-            <p className="floor-map-description">
-              {map.description}
-            </p>
-          )}
         </div>
 
         <div
@@ -418,9 +783,6 @@ export default function FloorMap({
         </div>
       </div>
 
-      {/*
-        지도 표시 영역
-      */}
       <div className="floor-map-scroll-area">
         <div className="floor-map-canvas-wrap">
           <div className="floor-map-viewport">
@@ -430,9 +792,6 @@ export default function FloorMap({
                 transform: `scale(${MAP_ZOOM})`,
               }}
             >
-              {/*
-                Figma에서 만든 층별 SVG 지도
-              */}
               <img
                 src={floorImage}
                 alt={`경삼관 ${floor}층 실내 지도`}
@@ -440,9 +799,6 @@ export default function FloorMap({
                 draggable="false"
               />
 
-              {/*
-                지도 위 경로 오버레이
-              */}
               <svg
                 viewBox={`0 0 ${MAP_SIZE.width} ${MAP_SIZE.height}`}
                 preserveAspectRatio="xMidYMid meet"

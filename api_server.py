@@ -83,10 +83,11 @@ START_LOCATIONS = [
      "route_node_id": "서관_3층_엘리베이터앞"},
 
     # 건물 외부·외곽
-    {"location_id": "parking_stairs", "label": "주차장쪽 계단", "floor": "외부",
-     "route_node_id": "주차장쪽_시작노드"},
-    {"location_id": "side_road_entrance", "label": "쪽길 입구", "floor": "외부",
-     "route_node_id": "쪽길_시작노드(개구멍)"},
+    {"location_id": "parking_stairs", "label": "주차장쪽 계단", "floor": 1,
+ "route_node_id": "주차장쪽_시작노드"},
+
+{"location_id": "side_road_entrance", "label": "쪽길 입구", "floor": 1,
+ "route_node_id": "쪽길_시작노드(개구멍)"},
 ]
 
 
