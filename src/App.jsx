@@ -312,6 +312,7 @@ function App() {
   const [profile, setProfile] = useState("일반");
   const [mode, setMode] = useState("빠른도착");
   const [startLocationId, setStartLocationId] = useState("kkumjirak");
+  const [isStartOpen, setIsStartOpen] = useState(false);
 
   const [activeFloor, setActiveFloor] = useState(1);
 
@@ -415,6 +416,18 @@ function App() {
     }
 
     loadConfig();
+  }, []);
+
+  useEffect(() => {
+    function handleOutsideClick(event) {
+      if (!event.target.closest(".custom-select-wrapper")) {
+        setIsStartOpen(false);
+      }
+    }
+    document.addEventListener("click", handleOutsideClick);
+    return () => {
+      document.removeEventListener("click", handleOutsideClick);
+    };
   }, []);
 
   async function handleSimulation() {
@@ -620,33 +633,52 @@ function App() {
             <label className="field-group">
               <span>출발지</span>
 
-              <select
-                value={startLocationId}
-                onChange={(event) =>
-                  setStartLocationId(event.target.value)
-                }
-                disabled={isConfigLoading}
-              >
-                {groupedStartLocations.map((group) => (
-                  <optgroup
-                    key={String(group.floor)}
-                    label={
-                      group.floor === "외부"
-                        ? "건물 외부·외곽"
-                        : `${group.floor}층`
-                    }
-                  >
-                    {group.locations.map((location) => (
-                      <option
-                        key={location.location_id}
-                        value={location.location_id}
-                      >
-                        {location.label}
-                      </option>
+              <div className="custom-select-wrapper">
+                <button
+                  type="button"
+                  className="custom-select-trigger"
+                  onClick={() => !isConfigLoading && setIsStartOpen(!isStartOpen)}
+                  disabled={isConfigLoading}
+                >
+                  <span>{selectedStart?.label}</span>
+                  <span className="custom-select-arrow">▼</span>
+                </button>
+                {isStartOpen && (
+                  <div className="custom-select-options">
+                    {groupedStartLocations.map((group) => (
+                      <div key={String(group.floor)} className="custom-select-group">
+                        <div className="custom-select-group-label">
+                          {group.floor === "외부"
+                            ? "건물 외부·외곽"
+                            : `${group.floor}층`}
+                        </div>
+                        <ul>
+                          {group.locations.map((location) => (
+                            <li
+                              key={location.location_id}
+                              className={[
+                                startLocationId === location.location_id
+                                  ? "is-selected"
+                                  : "",
+                                location.disabled ? "is-disabled" : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                              onClick={() => {
+                                if (location.disabled) return;
+                                setStartLocationId(location.location_id);
+                                setIsStartOpen(false);
+                              }}
+                            >
+                              {location.label}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     ))}
-                  </optgroup>
-                ))}
-              </select>
+                  </div>
+                )}
+              </div>
             </label>
 
             <div className="direction-arrow" aria-hidden="true">
@@ -656,12 +688,18 @@ function App() {
             <label className="field-group">
               <span>목적지</span>
 
-              <select value={config.destination.node_id} disabled>
-                <option value={config.destination.node_id}>
-                  {config.destination.floor}층 ·{" "}
-                  {config.destination.label}
-                </option>
-              </select>
+              <div className="custom-select-wrapper">
+                <button
+                  type="button"
+                  className="custom-select-trigger"
+                  disabled
+                >
+                  <span>
+                    {config.destination.floor}층 · {config.destination.label}
+                  </span>
+                  <span className="custom-select-arrow">▼</span>
+                </button>
+              </div>
             </label>
           </section>
 
@@ -939,6 +977,18 @@ function App() {
 
                           <p>
                             {detail.edge_type || "이동 구간"}
+                            {detail.상태 && (
+                              <span
+                                className="timeline-status-text"
+                                style={{
+                                  marginLeft: "8px",
+                                  fontWeight: "600",
+                                  color: "var(--primary)",
+                                }}
+                              >
+                                ({detail.상태})
+                              </span>
+                            )}
                           </p>
 
                           <div className="timeline-tags">

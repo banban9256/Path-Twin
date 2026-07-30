@@ -261,6 +261,44 @@ def convert_route(
 
     details = []
     for index, detail in enumerate(route["details"]):
+        edge_type = str(detail.get("edge_type") or "")
+        stairs_count = int(detail.get("stairs_count") or 0)
+        from_node = detail["from"]
+        to_node = detail["to"]
+
+        def get_floor(node_id):
+            if "1층" in node_id:
+                return 1
+            if "2층" in node_id:
+                return 2
+            if "3층" in node_id:
+                return 3
+            if "4층" in node_id:
+                return 4
+            return 0
+
+        from_floor = get_floor(from_node)
+        to_floor = get_floor(to_node)
+
+        status_text = ""
+        if edge_type == "엘리베이터":
+            status_text = "엘리베이터 타는 중"
+        elif stairs_count > 0 or "계단" in edge_type:
+            if from_floor > 0 and to_floor > 0:
+                if to_floor > from_floor:
+                    status_text = "계단 올라가는 중"
+                elif to_floor < from_floor:
+                    status_text = "계단 내려가는 중"
+                else:
+                    status_text = "계단 이용 중"
+            else:
+                if "아래" in from_node and "위" in to_node:
+                    status_text = "계단 올라가는 중"
+                elif "위" in from_node and "아래" in to_node:
+                    status_text = "계단 내려가는 중"
+                else:
+                    status_text = "계단 이용 중"
+
         details.append(
             {
                 **detail,
@@ -273,6 +311,7 @@ def convert_route(
                     detail["to"],
                     detail["to"],
                 ),
+                "상태": status_text,
             }
         )
 
@@ -316,6 +355,35 @@ def health():
 
 @app.get("/api/config")
 def config():
+    modified_locations = []
+    for loc in START_LOCATIONS:
+        label = loc["label"]
+        floor = loc["floor"]
+        disabled = False
+        
+        # 1층 비활성
+        if floor == 1 and label in ("꼼지락", "카페", "복사실"):
+            disabled = True
+        # 2층 비활성
+        elif floor == 2 and (label in ("교수학습지원센터", "대학행정팀", "IPP센터") or "중앙 도서관" in label or "중앙도서관" in label):
+            disabled = True
+        # 3층 비활성
+        elif floor == 3 and (label in ("세미나실",) or "중앙 도서관" in label or "중앙도서관" in label):
+            disabled = True
+        # 4층 비활성
+        elif floor == 4 and label in ("북카페",):
+            disabled = True
+
+        if disabled:
+            label = f"{label}(학습예정)"
+        
+        modified_locations.append({
+            **loc,
+            "label": label,
+            "disabled": disabled,
+            "is_selectable": not disabled
+        })
+
     return jsonify(
         {
             "profiles": [
@@ -326,7 +394,7 @@ def config():
                 for profile in PROFILES
             ],
             "modes": MODES,
-            "start_locations": START_LOCATIONS,
+            "start_locations": modified_locations,
             "destination": {
                 "node_id": DESTINATION_NODE,
                 "label": NODE_LABELS[DESTINATION_NODE],
@@ -434,7 +502,7 @@ def routes():
                     "routes": [],
                 }
             ),
-            404,
+            200,
         )
 
     converted_routes = [

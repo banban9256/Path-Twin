@@ -4,9 +4,9 @@ import sqlite3
 import pandas as pd
 
 SCRIPT_DIR = os.path.dirname(__file__)
-DB_PATH = os.path.join(SCRIPT_DIR, "goahead.db")
+DB_PATH = os.path.join(os.path.dirname(SCRIPT_DIR), "goahead.db")
 
-DEFAULT_CSV = os.path.join(SCRIPT_DIR, "data", "경삼관_최종_정규화데이터_완료.csv")
+DEFAULT_CSV = os.path.join(os.path.dirname(SCRIPT_DIR), "data", "경삼관_최종_정규화데이터_완료.csv")
 
 
 def get_csv_path():
