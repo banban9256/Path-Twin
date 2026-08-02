@@ -47,82 +47,137 @@ def clear_cache():
     _cached_edges = None
 
 
-# ─── 차단 판정 (계단만 차단) ───
-def _is_blocked(edge, profile):
-    stairs = edge["stairs_count"]
-    if profile == "휠체어" and stairs > 0:
-        return True
-    if profile == "유아차" and stairs > 0:
-        return True
-    return False
-
-
-# ─── 가중치 딕셔너리 ───
-WALK_SPEED = 80.0  # m/min
-ELEVATOR_COST = 0.5  # min per floor
-
-STAIR_COST_PER_STEP = {
-    "일반": 0.025,
-    "휠체어": float("inf"),
-    "목발": 0.065,
-    "유아차": float("inf"),
-    "짐": 0.035,
+# ─── 가중치 매트릭스 (독립 변수화) ───
+WALK_SPEEDS = {
+    "일반": 80.0,
+    "휠체어": 55.0,
+    "목발": 40.0,
+    "유아차": 55.0,
+    "짐": 60.0,
 }
 
-STEP_HEIGHT_COST = {
+ELEVATOR_COST = 0.5  # min per floor
+
+STAIR_WEIGHT_MATRIX = {
+    "일반": {
+        "빠른도착": 1.0,
+        "편하게": 2.5
+    },
+    "목발": {
+        "빠른도착": 3.0,
+        "편하게": float("inf")
+    },
+    "짐": {
+        "빠른도착": 2.0,
+        "편하게": 4.0
+    },
+    "휠체어": {
+        "빠른도착": float("inf"),
+        "편하게": float("inf")
+    },
+    "유아차": {
+        "빠른도착": float("inf"),
+        "편하게": float("inf")
+    }
+}
+
+ELEVATOR_WAIT_MATRIX = {
+    "일반": {
+        "빠른도착": 3.0,  # 대기 시간 페널티 적용 (어지간하면 계단 선호)
+        "편하게": 0.2
+    },
+    "목발": {
+        "빠른도착": 0.8,
+        "편하게": 0.2
+    },
+    "짐": {
+        "빠른도착": 1.5,
+        "편하게": 0.2
+    },
+    "휠체어": {
+        "빠른도착": 0.5,
+        "편하게": 0.5
+    },
+    "유아차": {
+        "빠른도착": 0.5,
+        "편하게": 0.5
+    }
+}
+
+STEP_WEIGHT_MATRIX = {
     "일반":   {"없음": 0.0,  "미니": 0.05, "중간": 0.15},
-    "휠체어":  {"없음": 0.0,  "미니": 0.15, "중간": 0.40},
+    "휠체어":  {"없음": 0.0,  "미니": float("inf"), "중간": float("inf")},
     "목발":   {"없음": 0.0,  "미니": 0.12, "중간": 0.35},
-    "유아차":  {"없음": 0.0,  "미니": 0.20, "중간": 0.50},
+    "유아차":  {"없음": 0.0,  "미니": float("inf"), "중간": float("inf")},
     "짐":     {"없음": 0.0,  "미니": 0.05, "중간": 0.15},
 }
 
-DOOR_COST = {
+DOOR_WEIGHT_MATRIX = {
     "일반": {
         "없음": 0.0,
         "밀고당기관문 1번": 0.10,
         "밀고당기관문 2번": 0.20,
         "밀고당기관문 1번 + 자동문 1번": 0.05,
+        "회전문": 0.10,
+        "자동문": 0.0,
+        "밀고 당기는 문": 0.10
     },
     "휠체어": {
         "없음": 0.0,
-        "밀고당기관문 1번": 0.30,
-        "밀고당기관문 2번": 0.50,
-        "밀고당기관문 1번 + 자동문 1번": 0.10,
+        "밀고당기관문 1번": 3.0,
+        "밀고당기관문 2번": 5.0,
+        "밀고당기관문 1번 + 자동문 1번": 1.0,
+        "회전문": float("inf"),
+        "자동문": 1.0,
+        "밀고 당기는 문": 3.0
     },
     "목발": {
         "없음": 0.0,
         "밀고당기관문 1번": 0.15,
         "밀고당기관문 2번": 0.30,
         "밀고당기관문 1번 + 자동문 1번": 0.08,
+        "회전문": 0.50,
+        "자동문": 0.08,
+        "밀고 당기는 문": 0.15
     },
     "유아차": {
         "없음": 0.0,
-        "밀고당기관문 1번": 0.12,
-        "밀고당기관문 2번": 0.25,
-        "밀고당기관문 1번 + 자동문 1번": 0.06,
+        "밀고당기관문 1번": 3.0,
+        "밀고당기관문 2번": 5.0,
+        "밀고당기관문 1번 + 자동문 1번": 1.0,
+        "회전문": float("inf"),
+        "자동문": 1.0,
+        "밀고 당기는 문": 3.0
     },
     "짐": {
         "없음": 0.0,
         "밀고당기관문 1번": 0.12,
         "밀고당기관문 2번": 0.25,
         "밀고당기관문 1번 + 자동문 1번": 0.06,
+        "회전문": 0.20,
+        "자동문": 0.06,
+        "밀고 당기는 문": 0.12
     },
 }
 
-COMFORT_MULTIPLIER = 2.5
+COMFORT_MULTIPLIER = 150.0
 
 
 # ─── 가중치 계산 ───
 def _compute_weight(edge, profile, mode):
+    start = edge.get("start_node", "")
+    end = edge.get("end_node", "")
+
+    # 루프 방지: 시작 노드와 끝 노드가 동일한 불필요한 왕복 엣지의 비용은 무한대로 처리
+    if start == end:
+        return float("inf")
+
     dist = edge["distance_m"]
     stairs = edge["stairs_count"]
     step = edge["step_height"]
     door = edge["door_type"]
     etype = edge["edge_type"]
     obstacle = edge.get("obstacle_info", "")
-    start = edge.get("start_node", "")
-    end = edge.get("end_node", "")
 
     # 열람실 긴계단 식별
     is_long_stair = (
@@ -130,70 +185,50 @@ def _compute_weight(edge, profile, mode):
         "가장 긴 계단" in obstacle
     )
 
+    # 1. 엘리베이터인 경우 가중치 계산
     if etype == "엘리베이터":
-        base = ELEVATOR_COST
+        # 엘리베이터 이용 대기 비용 + 탑승 비용
+        wait_cost = ELEVATOR_WAIT_MATRIX[profile][mode]
+        base = wait_cost + ELEVATOR_COST
+
+    # 2. 계단이 있는 경우 가중치 계산
     elif stairs > 0:
-        is_low_center_stair = "중앙 낮은 계단" in obstacle
-        is_side_road_stair = (
-            "쪽길" in start or "쪽길" in end or
-            "쪽계단" in start or "쪽계단" in end or
-            "쪽길" in obstacle or "쪽계단" in obstacle
-        )
+        # 목발 사용자 빠른 모드: 계단은 최대 2칸까지만 허용, 그 이상은 우회
+        if profile == "목발" and mode == "빠른도착" and stairs > 2:
+            return float("inf")
 
-        # 쪽길입구 계단 간선 예외 처리
-        if is_side_road_stair:
-            if profile in ("휠체어", "유아차", "목발"):
-                return float("inf")
-            else:
-                # 일반 사용자 및 무거운 짐 소지자는 기본 가중치 적용
-                base = stairs * STAIR_COST_PER_STEP[profile]
-        else:
-            # 휠체어 & 유아차는 모든 계단 진입 불가
-            if profile in ("휠체어", "유아차"):
-                return float("inf")
+        # 계단 가중치 룩업
+        stair_weight = STAIR_WEIGHT_MATRIX[profile][mode]
+        if stair_weight == float("inf"):
+            return float("inf")
 
-            # 목발 사용자
-            elif profile == "목발":
-                if mode == "편하게":
-                    # 편하게 선택 시 휠체어와 동일 (계단 절대 불가)
-                    return float("inf")
-                else: # 빠른도착 선택 시
-                    # 완만한 '중앙 낮은 계단'만 예외 허용, 일반 계단은 절대 불가
-                    if is_low_center_stair:
-                        base = 50.0 * (5.0 ** stairs)
-                    else:
-                        return float("inf")
+        base = stairs * stair_weight
 
-            # 무거운 짐 소지자
-            elif profile == "짐":
-                if mode == "편하게":
-                    # 엘리베이터 우회를 최우선 유도하기 위해 페널티 극대화 (5000.0)
-                    base = 5000.0 + stairs * STAIR_COST_PER_STEP[profile]
-                else:
-                    # 빠르게 갈 때는 기본 가중치 적용
-                    base = stairs * STAIR_COST_PER_STEP[profile]
-            else:
-                if mode == "편하게":
-                    # 일반 보행자도 '편하게' 갈 때는 피로도 페널티 가산 (3000.0)
-                    base = 3000.0 + stairs * STAIR_COST_PER_STEP[profile]
-                else:
-                    base = stairs * STAIR_COST_PER_STEP[profile]
-
-        # 열람실 긴계단 추가 페널티 부여 (구름다리 선호)
-        if is_long_stair:
+        # 열람실 긴계단 추가 페널티 부여 (편하게 모드에서만 적용)
+        if is_long_stair and mode == "편하게":
             base += 500.0
+
+    # 3. 평지인 경우
     else:
-        base = dist / WALK_SPEED
+        # 거리 * 거리비용 (거리비용 = 1.0 / 보행속도)
+        speed = WALK_SPEEDS.get(profile, 80.0)
+        base = dist / speed
 
         # 편하게 모드일 때 구름다리 -> 엘리베이터 연계를 위해 계단앞으로 빠지는 우회 복도에 페널티 부여
         if mode == "편하게" and {start, end} == {"서관_2층_계단앞", "서관_2층_엘리베이터앞"}:
             base += 200.0
 
-    comfort = COMFORT_MULTIPLIER if mode == "편하게" else 1.0
-    step_p = STEP_HEIGHT_COST[profile].get(step, 0.0)
-    door_p = DOOR_COST[profile].get(door, 0.0)
+    # 턱 및 문 통과 가중치
+    step_weight = STEP_WEIGHT_MATRIX[profile].get(step, 0.0)
+    door_weight = DOOR_WEIGHT_MATRIX[profile].get(door, 0.0)
 
-    return base + (step_p + door_p) * comfort
+    # 턱이나 문 통과가 불가능한 경우 차단
+    if step_weight == float("inf") or door_weight == float("inf"):
+        return float("inf")
+
+    comfort = COMFORT_MULTIPLIER if mode == "편하게" else 1.0
+
+    return base + (step_weight + door_weight) * comfort
 
 
 # ─── 그래프 빌드 (캐시에서 weight만 재계산) ───
@@ -241,10 +276,6 @@ def build_graph(profile="일반", mode="빠른도착"):
             edge["stairs_count"] = 24
         elif {start, end} == {"동관_3층_계단앞", "동관_4층_계단앞"}:
             edge["stairs_count"] = 23
-
-        # 교통약자(휠체어, 유아차, 목발)는 모든 계단 간선 원천 차단 (Hard Block)
-        if profile in ("휠체어", "유아차", "목발") and edge.get("stairs_count", 0) > 0:
-            continue
 
         w = _compute_weight(edge, profile, mode)
         if w == float("inf"):
@@ -329,9 +360,6 @@ def build_graph(profile="일반", mode="빠른도착"):
     ]
 
     for edge in bypass_edges:
-        if profile in ("휠체어", "유아차", "목발") and edge.get("stairs_count", 0) > 0:
-            continue
-
         w = _compute_weight(edge, profile, mode)
         if w == float("inf"):
             continue
@@ -406,8 +434,15 @@ def find_fallback_path(start, end, profile="일반", mode="빠른도착"):
     G_general = build_graph(profile="일반", mode="빠른도착")
     
     # 만약 profile이 교통약자(휠체어, 유아차, 목발)라면 Fallback 탐색에서도 계단을 완전 차단
+    # (목발의 빠른도착 모드 계단 허용 조건은 최대 2칸 이하인 경우만 적용)
     if profile in ("휠체어", "유아차", "목발"):
-        edges_to_remove = [(u, v) for u, v, d in G_general.edges(data=True) if d.get("stairs_count", 0) > 0]
+        edges_to_remove = []
+        for u, v, d in G_general.edges(data=True):
+            stairs = d.get("stairs_count", 0)
+            if stairs > 0:
+                if profile == "목발" and mode == "빠른도착" and stairs <= 2:
+                    continue
+                edges_to_remove.append((u, v))
         G_general.remove_edges_from(edges_to_remove)
     
     # 그래프 상에 엘리베이터 타입의 노드 찾기
