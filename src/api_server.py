@@ -145,18 +145,16 @@ def make_json_safe(value: Any) -> Any:
 
 
 def calculate_estimated_seconds(
-    total_distance_m: float,
-    total_stairs: int,
+    details: list[dict[str, Any]],
     profile: str,
 ) -> int:
     """
-    발표용 예상 이동 시간입니다.
-
-    거리 기반 보행 시간에 계단 통과 시간을 합산합니다.
-    경로 순위 계산 자체는 기존 pathfinder.py의 실제 가중치를 사용합니다.
+    순수 물리적 소요 시간을 초 단위로 계산합니다.
+    인공적인 페널티(comfort_multiplier, 계단 회피 가중치 등)는 전혀 반영하지 않으며,
+    오직 순수 이동 거리/속도, 엘리베이터 실제 대기/탑승 시간, 계단 오르내리는 시간만 합산합니다.
     """
-    speed = PROFILE_SPEED_M_PER_MIN.get(profile, 80.0)
-    walking_minutes = total_distance_m / speed
+    speed_m_per_min = PROFILE_SPEED_M_PER_MIN.get(profile, 80.0)
+    speed_m_per_sec = speed_m_per_min / 60.0
 
     stair_seconds_per_step = {
         "일반": 1.5,
@@ -166,8 +164,30 @@ def calculate_estimated_seconds(
         "짐": 2.2,
     }.get(profile, 1.5)
 
-    stair_seconds = total_stairs * stair_seconds_per_step
-    total_seconds = walking_minutes * 60 + stair_seconds
+    total_seconds = 0.0
+    in_elevator = False  # 엘리베이터 탑승 연속 여부 체크
+
+    for detail in details:
+        etype = detail.get("edge_type", "")
+        dist = float(detail.get("distance_m") or 0.0)
+        stairs = int(detail.get("stairs_count") or 0)
+
+        if etype == "엘리베이터":
+            if not in_elevator:
+                # 엘리베이터 최초 탑승 시: 대기 시간 90초 + 이동 시간 30초
+                total_seconds += 90.0 + 30.0
+                in_elevator = True
+            else:
+                # 연속 탑승 시 (예: 2층->3층 연속): 이동 시간 30초만 추가
+                total_seconds += 30.0
+        else:
+            in_elevator = False
+            # 평지 보행 시간 계산
+            if dist > 0:
+                total_seconds += dist / speed_m_per_sec
+            # 계단 이용 시간 계산
+            if stairs > 0:
+                total_seconds += stairs * stair_seconds_per_step
 
     return max(1, round(total_seconds))
 
@@ -326,8 +346,7 @@ def convert_route(
         "details": details,
         "summary": summary,
         "estimated_seconds": calculate_estimated_seconds(
-            total_distance,
-            total_stairs,
+            details,
             profile,
         ),
         "warnings": build_warnings(details),
